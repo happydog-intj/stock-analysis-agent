@@ -2,16 +2,15 @@
 tests/test_collectors.py — 数据采集器单元测试
 
 覆盖：
-  - BaseCollector 游标读写
+  - BaseCollector run_once 异常处理
   - RedditCollector 关键词过滤逻辑
   - HKEXCollector 公告分类逻辑
-  - YahooFinanceCollector 数据解析
 """
 
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -19,7 +18,7 @@ from src.collectors.base import BaseCollector, CollectorError
 from src.collectors.hkex import HKEXCollector, classify_announcement
 from src.collectors.reddit import RedditCollector
 
-# ── 测试 BaseCollector 游标管理 ───────────────────────────────────────────────
+# ── 测试 BaseCollector ────────────────────────────────────────────────────────
 
 
 class ConcreteCollector(BaseCollector):
@@ -27,7 +26,7 @@ class ConcreteCollector(BaseCollector):
 
     platform = "test"
 
-    async def collect(self) -> list[dict[str, Any]]:
+    async def collect(self, since: Any = None) -> list[dict[str, Any]]:
         return []
 
 
@@ -39,61 +38,40 @@ class TestBaseCollector:
         return ConcreteCollector()
 
     @pytest.mark.asyncio
-    async def test_get_last_id_returns_none_initially(
-        self,
-        collector: ConcreteCollector,
-        mocker: Any,
+    async def test_run_once_returns_results(
+        self, collector: ConcreteCollector, mocker: Any
     ) -> None:
-        """测试首次调用时游标返回 None。"""
-        mock_redis = mocker.AsyncMock()
-        mock_redis.get.return_value = None
-        mocker.patch.object(collector, "_get_redis", return_value=mock_redis)
-
-        result = await collector.get_last_id()
-        assert result is None
+        """测试 run_once 正常返回采集结果。"""
+        expected = [{"platform": "test", "content": "hello"}]
+        mocker.patch.object(collector, "collect", return_value=expected)
+        result = await collector.run_once()
+        assert result == expected
 
     @pytest.mark.asyncio
-    async def test_save_and_get_last_id(
+    async def test_run_once_handles_collector_error(
         self,
         collector: ConcreteCollector,
         mocker: Any,
     ) -> None:
-        """测试保存游标后可以读取。"""
-        stored_value: dict[str, str] = {}
-
-        async def mock_set(key: str, value: str) -> None:
-            stored_value[key] = value
-
-        async def mock_get(key: str) -> str | None:
-            return stored_value.get(key)
-
-        mock_redis = mocker.AsyncMock()
-        mock_redis.set.side_effect = mock_set
-        mock_redis.get.side_effect = mock_get
-        mocker.patch.object(collector, "_get_redis", return_value=mock_redis)
-
-        await collector.save_last_id("abc-123")
-        result = await collector.get_last_id()
-        assert result == "abc-123"
-
-    @pytest.mark.asyncio
-    async def test_run_once_handles_error_gracefully(
-        self,
-        collector: ConcreteCollector,
-        mocker: Any,
-    ) -> None:
-        """测试 run_once 捕获异常并返回空列表。"""
-        mocker.patch.object(
-            collector,
-            "collect",
-            side_effect=CollectorError("测试错误"),
-        )
+        """测试 run_once 捕获 CollectorError 并返回空列表。"""
+        mocker.patch.object(collector, "collect", side_effect=CollectorError("测试错误"))
         result = await collector.run_once()
         assert result == []
 
-    def test_cursor_key_format(self, collector: ConcreteCollector) -> None:
-        """测试游标键名格式。"""
-        assert collector._cursor_key == "collector:test:last_id"
+    @pytest.mark.asyncio
+    async def test_run_once_handles_unexpected_error(
+        self,
+        collector: ConcreteCollector,
+        mocker: Any,
+    ) -> None:
+        """测试 run_once 捕获未知异常并返回空列表。"""
+        mocker.patch.object(collector, "collect", side_effect=RuntimeError("意外错误"))
+        result = await collector.run_once()
+        assert result == []
+
+    def test_repr(self, collector: ConcreteCollector) -> None:
+        """测试 __repr__ 输出格式。"""
+        assert repr(collector) == "<ConcreteCollector platform=test>"
 
 
 # ── 测试 RedditCollector 关键词过滤 ──────────────────────────────────────────
@@ -138,12 +116,6 @@ class TestRedditCollector:
             "_sync_collect",
             side_effect=Exception("网络错误"),
         )
-        mocker.patch.object(
-            collector,
-            "get_last_id",
-            return_value=None,
-        )
-        # run_once 应捕获异常
         result = await collector.run_once()
         assert result == []
 

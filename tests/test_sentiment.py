@@ -68,11 +68,8 @@ class TestSentimentAnalyzer:
         mocker: Any,
     ) -> None:
         """测试批量分析返回包含情绪字段的增强记录。"""
-        # Mock Redis 缓存（全部未命中）
-        mock_redis = mocker.AsyncMock()
-        mock_redis.get.return_value = None
-        mock_redis.setex.return_value = True
-        mocker.patch.object(analyzer, "_get_redis", return_value=mock_redis)
+        # 内存缓存为空（全部未命中）
+        analyzer._cache.clear()
 
         # Mock Claude API 调用
         mock_response = MagicMock()
@@ -111,17 +108,15 @@ class TestSentimentAnalyzer:
             "topics": ["cached_topic"],
             "confidence": 0.9,
         }
-
-        # Mock Redis 返回缓存命中
-        mock_redis = mocker.AsyncMock()
-        mock_redis.get.return_value = json.dumps(cached_result)
-        mocker.patch.object(analyzer, "_get_redis", return_value=mock_redis)
+        content = "测试内容"
+        # 直接写入内存缓存
+        analyzer._cache[analyzer._cache_key(content)] = cached_result
 
         # Mock Claude（不应被调用）
         mock_client = mocker.AsyncMock()
         mocker.patch.object(analyzer, "_get_client", return_value=mock_client)
 
-        records = [{"content": "测试内容", "platform": "xueqiu"}]
+        records = [{"content": content, "platform": "xueqiu"}]
         results = await analyzer.analyze_batch(records)
 
         assert len(results) == 1
