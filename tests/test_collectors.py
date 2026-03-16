@@ -19,8 +19,8 @@ from src.collectors.base import BaseCollector, CollectorError
 from src.collectors.hkex import HKEXCollector, classify_announcement
 from src.collectors.reddit import RedditCollector
 
-
 # ── 测试 BaseCollector 游标管理 ───────────────────────────────────────────────
+
 
 class ConcreteCollector(BaseCollector):
     """用于测试的具体采集器实现（最小化 stub）。"""
@@ -98,6 +98,7 @@ class TestBaseCollector:
 
 # ── 测试 RedditCollector 关键词过滤 ──────────────────────────────────────────
 
+
 class TestRedditCollector:
     """RedditCollector 单元测试。"""
 
@@ -149,6 +150,7 @@ class TestRedditCollector:
 
 # ── 测试 HKEXCollector 公告分类 ──────────────────────────────────────────────
 
+
 class TestHKEXClassifier:
     """HKEXCollector 公告分类逻辑测试。"""
 
@@ -173,7 +175,9 @@ class TestHKEXClassifier:
     ) -> None:
         """测试各种公告标题的分类准确性。"""
         ann_type, priority = classify_announcement(title)
-        assert ann_type == expected_type, f"标题 '{title}' 期望类型 {expected_type}，实际 {ann_type}"
+        assert ann_type == expected_type, (
+            f"标题 '{title}' 期望类型 {expected_type}，实际 {ann_type}"
+        )
         assert priority == expected_priority, (
             f"标题 '{title}' 期望优先级 {expected_priority}，实际 {priority}"
         )

@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 import anthropic
@@ -245,7 +245,7 @@ class SentimentAnalyzer:
                     "sentiment": analysis.get("sentiment"),
                     "topics": analysis.get("topics", []),
                     "confidence": analysis.get("confidence"),
-                    "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                    "analyzed_at": datetime.now(UTC).isoformat(),
                 }
                 enriched.append(enriched_record)
 

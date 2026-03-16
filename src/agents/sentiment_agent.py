@@ -63,10 +63,7 @@ class SentimentAgent:
         logger.info("SentimentAgent: 处理 %d 条记录", len(pending))
 
         # 转换为分析器所需格式
-        inputs = [
-            {"content": r.content, "_id": r.id}
-            for r in pending
-        ]
+        inputs = [{"content": r.content, "_id": r.id} for r in pending]
         analyzed = await self.analyzer.analyze_batch(inputs)
 
         # 回写分析结果

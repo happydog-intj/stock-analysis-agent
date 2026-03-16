@@ -18,15 +18,15 @@ import argparse
 import asyncio
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from config.settings import settings
-from src.db.database import close_db, init_db, get_session
-from src.db.models import CompetitorSnapshot
+from config.settings import settings  # noqa: E402
+from src.db.database import close_db, get_session, init_db  # noqa: E402
+from src.db.models import CompetitorSnapshot  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,7 +56,7 @@ async def backfill_ticker(ticker: str, days: int) -> int:
     try:
         ticker_obj = yf.Ticker(ticker)
         # 拉取历史数据
-        end_date = datetime.now(timezone.utc)
+        end_date = datetime.now(UTC)
         start_date = end_date - timedelta(days=days)
         hist = ticker_obj.history(
             start=start_date.strftime("%Y-%m-%d"),
@@ -100,7 +100,7 @@ async def backfill_ticker(ticker: str, days: int) -> int:
                     revenue_ttm=revenue_ttm,
                     pe_ratio=pe_ratio,
                     ps_ratio=ps_ratio,
-                    captured_at=datetime.now(timezone.utc),
+                    captured_at=datetime.now(UTC),
                 )
             )
 

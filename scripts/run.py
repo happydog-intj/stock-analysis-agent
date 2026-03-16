@@ -25,9 +25,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from config.settings import settings
-from src.db.database import close_db, init_db
-from src.scheduler.jobs import create_scheduler
+from config.settings import settings  # noqa: E402
+from src.db.database import close_db, init_db  # noqa: E402
+from src.scheduler.jobs import create_scheduler  # noqa: E402
 
 # 配置根日志
 logging.basicConfig(
@@ -50,6 +50,7 @@ async def main(args: argparse.Namespace) -> None:
     # 2. 立即触发测试报告
     if args.test_report:
         from src.agents.orchestrator import Orchestrator
+
         logger.info("触发测试报告: %s", args.test_report)
         orchestrator = Orchestrator()
         await orchestrator.run_report(period=args.test_report)
@@ -61,11 +62,13 @@ async def main(args: argparse.Namespace) -> None:
     scheduler = create_scheduler()
     scheduler.start()
     logger.info("🚀 股票分析 Agent 已启动，调度器运行中...")
-    logger.info("   晨报: %s | 午报: %s | 收盘报: %s (%s)",
-                settings.morning_report_time,
-                settings.noon_report_time,
-                settings.close_report_time,
-                settings.scheduler_timezone)
+    logger.info(
+        "   晨报: %s | 午报: %s | 收盘报: %s (%s)",
+        settings.morning_report_time,
+        settings.noon_report_time,
+        settings.close_report_time,
+        settings.scheduler_timezone,
+    )
 
     # 4. 等待中断信号
     stop_event = asyncio.Event()

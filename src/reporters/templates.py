@@ -68,10 +68,13 @@ def build_morning_report(data: dict[str, Any]) -> dict[str, Any]:
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     # 公告摘要
-    ann_text = "\n".join(
-        f"• [{a.get('announcement_type', 'general').upper()}] {a.get('title', '')}"
-        for a in announcements[:3]
-    ) or "今日暂无重要公告"
+    ann_text = (
+        "\n".join(
+            f"• [{a.get('announcement_type', 'general').upper()}] {a.get('title', '')}"
+            for a in announcements[:3]
+        )
+        or "今日暂无重要公告"
+    )
 
     # 风险信号
     risk_items = (financial.get("risk_signals") or []) + divergence
@@ -274,10 +277,13 @@ def build_close_report(data: dict[str, Any]) -> dict[str, Any]:
     risk_text = "\n".join(risk_signals) if risk_signals else "✅ 今日无重大风险信号"
 
     # 重要公告
-    ann_text = "\n".join(
-        f"• [{a.get('priority', 1)}P] {a.get('title', '')}"
-        for a in sorted(announcements, key=lambda x: x.get("priority", 1), reverse=True)[:3]
-    ) or "今日无重要公告"
+    ann_text = (
+        "\n".join(
+            f"• [{a.get('priority', 1)}P] {a.get('title', '')}"
+            for a in sorted(announcements, key=lambda x: x.get("priority", 1), reverse=True)[:3]
+        )
+        or "今日无重要公告"
+    )
 
     return {
         "msg_type": "interactive",

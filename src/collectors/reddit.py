@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from functools import partial
 from typing import Any
 
@@ -74,9 +74,7 @@ class RedditCollector(BaseCollector):
 
         TODO: 同步采集帖子下的顶层评论
         """
-        created_at = datetime.fromtimestamp(
-            submission.created_utc, tz=timezone.utc
-        ).isoformat()
+        created_at = datetime.fromtimestamp(submission.created_utc, tz=UTC).isoformat()
         return {
             "platform": self.platform,
             "ticker": settings.primary_ticker,
@@ -110,8 +108,8 @@ class RedditCollector(BaseCollector):
         results: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
 
-        query       = " OR ".join(settings.reddit_keywords)
-        time_filter = "day" if since_ts else "week"   # 今日任务用 day，减少 API 用量
+        query = " OR ".join(settings.reddit_keywords)
+        time_filter = "day" if since_ts else "week"  # 今日任务用 day，减少 API 用量
 
         for sub_name in settings.reddit_subreddits:
             try:
@@ -156,9 +154,7 @@ class RedditCollector(BaseCollector):
 
         loop = asyncio.get_event_loop()
         try:
-            posts = await loop.run_in_executor(
-                None, partial(self._sync_collect, since_ts)
-            )
+            posts = await loop.run_in_executor(None, partial(self._sync_collect, since_ts))
         except CollectorError:
             raise
         except Exception as e:

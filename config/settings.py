@@ -1,6 +1,7 @@
 """
 全局配置：从 .env 文件读取所有敏感配置（pydantic-settings）。
 """
+
 from __future__ import annotations
 
 from pydantic import Field
@@ -48,17 +49,17 @@ class Settings(BaseSettings):
     # ── MiniMax ────────────────────────────────────────
     # 控制台：https://platform.minimaxi.com/
     # 默认模型：abab6.5s-chat  可选：abab5.5-chat
-    MINIMAX_API_KEY:  str = Field(default="", description="MiniMax API Key")
+    MINIMAX_API_KEY: str = Field(default="", description="MiniMax API Key")
     MINIMAX_GROUP_ID: str = Field(default="", description="MiniMax Group ID")
 
     # ── 飞书 ───────────────────────────────────────────
     FEISHU_WEBHOOK: str = Field(default="", description="飞书机器人 Webhook URL")
 
     # ── Reddit ─────────────────────────────────────────
-    REDDIT_CLIENT_ID:     str = ""
+    REDDIT_CLIENT_ID: str = ""
     REDDIT_CLIENT_SECRET: str = ""
-    REDDIT_USERNAME:      str = ""
-    REDDIT_PASSWORD:      str = ""
+    REDDIT_USERNAME: str = ""
+    REDDIT_PASSWORD: str = ""
 
     # ── 雪球 ───────────────────────────────────────────
     XUEQIU_COOKIES: str = Field(
@@ -67,8 +68,8 @@ class Settings(BaseSettings):
     )
 
     # ── 富途 ───────────────────────────────────────────
-    FUTU_HOST: str  = "127.0.0.1"
-    FUTU_PORT: int  = 11111
+    FUTU_HOST: str = "127.0.0.1"
+    FUTU_PORT: int = 11111
 
     # ── 目标股票 ────────────────────────────────────────
     PRIMARY_TICKER: str = "1860.HK"

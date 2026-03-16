@@ -17,9 +17,9 @@ TODO: 失败时写入死信队列，支持重试
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
-import base64
 import json
 import logging
 import time

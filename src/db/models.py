@@ -31,13 +31,16 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 class Base(DeclarativeBase):
     """所有 ORM 模型的基类。"""
+
     pass
 
 
 # ── 枚举类型 ──────────────────────────────────────────────────────────────────
 
-class SentimentLabel(str, enum.Enum):
+
+class SentimentLabel(enum.StrEnum):
     """情绪标签。"""
+
     VERY_BULLISH = "very_bullish"
     BULLISH = "bullish"
     NEUTRAL = "neutral"
@@ -45,8 +48,9 @@ class SentimentLabel(str, enum.Enum):
     VERY_BEARISH = "very_bearish"
 
 
-class Platform(str, enum.Enum):
+class Platform(enum.StrEnum):
     """数据来源平台。"""
+
     XUEQIU = "xueqiu"
     REDDIT = "reddit"
     FUTU = "futu"
@@ -55,16 +59,18 @@ class Platform(str, enum.Enum):
     OTHER = "other"
 
 
-class ReportPeriod(str, enum.Enum):
+class ReportPeriod(enum.StrEnum):
     """报告周期。"""
+
     MORNING = "morning"
     NOON = "noon"
     CLOSE = "close"
     DAILY = "daily"
 
 
-class AnnouncementType(str, enum.Enum):
+class AnnouncementType(enum.StrEnum):
     """港交所公告类型。"""
+
     EARNINGS = "earnings"
     BUYBACK = "buyback"
     SHAREHOLDING = "shareholding"
@@ -75,12 +81,14 @@ class AnnouncementType(str, enum.Enum):
 
 class AnnouncementPriority(int, enum.Enum):
     """公告优先级（数字越大越重要）。"""
+
     LOW = 1
     MEDIUM = 2
     HIGH = 3
 
 
 # ── SentimentRecord ───────────────────────────────────────────────────────────
+
 
 class SentimentRecord(Base):
     """
@@ -104,25 +112,19 @@ class SentimentRecord(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     author: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
-    score: Mapped[float | None] = mapped_column(
-        Float, nullable=True, comment="情绪分 -100 ~ 100"
-    )
+    score: Mapped[float | None] = mapped_column(Float, nullable=True, comment="情绪分 -100 ~ 100")
     sentiment: Mapped[str | None] = mapped_column(
         Enum(SentimentLabel, name="sentiment_label_enum"), nullable=True
     )
     topics: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, comment="Claude 提取的主题列表"
     )
-    confidence: Mapped[float | None] = mapped_column(
-        Float, nullable=True, comment="分析置信度 0~1"
-    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True, comment="分析置信度 0~1")
 
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
-    analyzed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_sentiment_ticker_platform_captured", "ticker", "platform", "captured_at"),
@@ -137,6 +139,7 @@ class SentimentRecord(Base):
 
 
 # ── DailySnapshot ─────────────────────────────────────────────────────────────
+
 
 class DailySnapshot(Base):
     """按标的 + 时段聚合的情绪快照，每天生成三次（晨/午/收盘）。"""
@@ -170,9 +173,7 @@ class DailySnapshot(Base):
     volume: Mapped[float | None] = mapped_column(Float, nullable=True)
     change_pct: Mapped[float | None] = mapped_column(Float, nullable=True, comment="涨跌幅 %")
 
-    __table_args__ = (
-        Index("ix_snapshot_ticker_period_time", "ticker", "period", "snapshot_time"),
-    )
+    __table_args__ = (Index("ix_snapshot_ticker_period_time", "ticker", "period", "snapshot_time"),)
 
     def __repr__(self) -> str:
         return (
@@ -182,6 +183,7 @@ class DailySnapshot(Base):
 
 
 # ── Announcement ─────────────────────────────────────────────────────────────
+
 
 class Announcement(Base):
     """港交所披露易公告记录。"""
@@ -212,9 +214,7 @@ class Announcement(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (
-        Index("ix_announcement_ticker_published", "ticker", "published_at"),
-    )
+    __table_args__ = (Index("ix_announcement_ticker_published", "ticker", "published_at"),)
 
     def __repr__(self) -> str:
         return (
@@ -224,6 +224,7 @@ class Announcement(Base):
 
 
 # ── CompetitorSnapshot ───────────────────────────────────────────────────────
+
 
 class CompetitorSnapshot(Base):
     """
@@ -246,7 +247,9 @@ class CompetitorSnapshot(Base):
     change_pct: Mapped[float | None] = mapped_column(Float, nullable=True, comment="日涨跌幅 %")
 
     market_cap: Mapped[float | None] = mapped_column(Float, nullable=True, comment="市值（USD）")
-    revenue_ttm: Mapped[float | None] = mapped_column(Float, nullable=True, comment="TTM 营收（USD）")
+    revenue_ttm: Mapped[float | None] = mapped_column(
+        Float, nullable=True, comment="TTM 营收（USD）"
+    )
     pe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, comment="市盈率 PE")
     ps_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, comment="市销率 PS")
 
@@ -257,9 +260,7 @@ class CompetitorSnapshot(Base):
         String(10), nullable=True, comment="交易日期 YYYY-MM-DD"
     )
 
-    __table_args__ = (
-        Index("ix_competitor_ticker_date", "ticker", "trade_date", unique=True),
-    )
+    __table_args__ = (Index("ix_competitor_ticker_date", "ticker", "trade_date", unique=True),)
 
     def __repr__(self) -> str:
         return (

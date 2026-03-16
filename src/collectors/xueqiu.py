@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from playwright.async_api import (
@@ -35,8 +35,7 @@ XUEQIU_URL = "https://xueqiu.com/S/01860"
 
 # 雪球 API：获取股票帖子列表（非官方，可能随版本变化）
 XUEQIU_API_POSTS = (
-    "https://xueqiu.com/query/v1/symbol/search/status.json"
-    "?count=20&symbol=01860&type=11"
+    "https://xueqiu.com/query/v1/symbol/search/status.json?count=20&symbol=01860&type=11"
 )
 
 
@@ -110,12 +109,11 @@ class XueqiuCollector(BaseCollector):
             # 去除 HTML 标签（简单处理）
             # TODO: 使用 BeautifulSoup 或正则更精确地清理 HTML
             import re
+
             content = re.sub(r"<[^>]+>", "", content).strip()
 
             created_ms = raw.get("created_at", 0)
-            created_at = datetime.fromtimestamp(
-                created_ms / 1000, tz=timezone.utc
-            ).isoformat()
+            created_at = datetime.fromtimestamp(created_ms / 1000, tz=UTC).isoformat()
 
             return {
                 "platform": self.platform,
@@ -154,9 +152,7 @@ class XueqiuCollector(BaseCollector):
             return []
 
         results: list[dict[str, Any]] = []
-        since_aware = (
-            since.replace(tzinfo=timezone.utc) if since and since.tzinfo is None else since
-        )
+        since_aware = since.replace(tzinfo=UTC) if since and since.tzinfo is None else since
 
         for raw in raw_posts:
             parsed = await self._parse_post(raw)
@@ -168,7 +164,7 @@ class XueqiuCollector(BaseCollector):
                 try:
                     post_time = datetime.fromisoformat(parsed["captured_at"])
                     if post_time.tzinfo is None:
-                        post_time = post_time.replace(tzinfo=timezone.utc)
+                        post_time = post_time.replace(tzinfo=UTC)
                     if post_time < since_aware:
                         self.logger.debug("帖子早于 since，终止遍历")
                         break

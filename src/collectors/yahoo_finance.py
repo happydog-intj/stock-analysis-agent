@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 import yfinance as yf
@@ -94,7 +94,7 @@ class YahooFinanceCollector(BaseCollector):
                 "revenue_ttm": revenue_ttm,
                 "pe_ratio": pe_ratio,
                 "ps_ratio": ps_ratio,
-                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "captured_at": datetime.now(UTC).isoformat(),
             }
         except Exception as e:
             logger.error("[%s] 获取行情失败: %s", ticker, e)
@@ -134,7 +134,8 @@ class YahooFinanceCollector(BaseCollector):
 
         # 增量过滤：跳过已采集的交易日
         new_results = [
-            r for r in results
+            r
+            for r in results
             if last_trade_date is None or r.get("trade_date", "") > last_trade_date
         ]
 

@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.collectors.base import BaseCollector
 from config.settings import settings
+from src.collectors.base import BaseCollector
 
 logger = logging.getLogger(__name__)
 

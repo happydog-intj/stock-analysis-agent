@@ -15,7 +15,7 @@ TODO: 如港交所开放官方 API，迁移至官方接口。
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 import httpx
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 
 # 港交所披露易公告搜索 API（内部接口，可能失效）
 HKEX_API_URL = (
-    "https://www1.hkexnews.hk/listedco/listconews/advancedsearch/json/"
-    "GetAnnouncement.aspx"
+    "https://www1.hkexnews.hk/listedco/listconews/advancedsearch/json/GetAnnouncement.aspx"
 )
 
 # 公告类型关键词映射（优先级打标）
@@ -168,8 +167,8 @@ class HKEXCollector(BaseCollector):
                 "announcement_type": ann_type,
                 "priority": priority,
                 "url": raw.get("url", ""),
-                "published_at": raw.get("published_at", datetime.now(timezone.utc).isoformat()),
-                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "published_at": raw.get("published_at", datetime.now(UTC).isoformat()),
+                "captured_at": datetime.now(UTC).isoformat(),
             }
             results.append(parsed)
 

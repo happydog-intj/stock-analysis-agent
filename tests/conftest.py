@@ -7,7 +7,8 @@ tests/conftest.py — pytest 全局 Fixture
 from __future__ import annotations
 
 import os
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 import pytest_asyncio

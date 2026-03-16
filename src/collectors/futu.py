@@ -21,8 +21,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.collectors.base import BaseCollector, CollectorError
 from config.settings import settings
+from src.collectors.base import BaseCollector, CollectorError
 
 logger = logging.getLogger(__name__)
 

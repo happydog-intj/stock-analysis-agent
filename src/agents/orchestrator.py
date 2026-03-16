@@ -10,7 +10,7 @@ src/agents/orchestrator.py — 主编排 Agent
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from config.settings import settings
@@ -106,7 +106,7 @@ class Orchestrator:
                     sentiment=r.get("sentiment"),
                     topics=r.get("topics"),
                     confidence=r.get("confidence"),
-                    captured_at=r.get("captured_at", datetime.now(timezone.utc)),
+                    captured_at=r.get("captured_at", datetime.now(UTC)),
                 )
                 session.add(record)
         logger.info("保存 %d 条情绪记录", len(records))
@@ -162,7 +162,7 @@ class Orchestrator:
                     announcement_type=a.get("announcement_type", "general"),
                     priority=a.get("priority", 1),
                     url=a.get("url"),
-                    published_at=a.get("published_at", datetime.now(timezone.utc)),
+                    published_at=a.get("published_at", datetime.now(UTC)),
                 )
                 session.add(ann)
         logger.info("保存 %d 条公告", len(announcements))
@@ -179,10 +179,7 @@ class Orchestrator:
         TODO: 从 DB 读取指定时间窗口内的所有记录计算聚合指标
         TODO: 计算 sentiment_dist（各情绪标签的分布）
         """
-        scores = [
-            r["score"] for r in sentiment_records
-            if r.get("score") is not None
-        ]
+        scores = [r["score"] for r in sentiment_records if r.get("score") is not None]
         sentiment_avg = sum(scores) / len(scores) if scores else None
 
         # 统计情绪分布
@@ -195,7 +192,7 @@ class Orchestrator:
         # 提取热门话题
         topic_counts: dict[str, int] = {}
         for r in sentiment_records:
-            for topic in (r.get("topics") or []):
+            for topic in r.get("topics") or []:
                 topic_counts[topic] = topic_counts.get(topic, 0) + 1
         top_topics = sorted(
             [{"topic": t, "count": c} for t, c in topic_counts.items()],
@@ -233,7 +230,7 @@ class Orchestrator:
         """
         logger.info("=" * 60)
         logger.info("开始 %s 报告流程", period)
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         # 1. 采集数据
         collected = await self.collect_all()
@@ -252,8 +249,7 @@ class Orchestrator:
         )
         peers = [c for c in competitor_comparisons if c.ticker != settings.primary_ticker]
         divergence_signals = (
-            self.competitor_analyzer.find_divergence_signals(primary, peers)
-            if primary else []
+            self.competitor_analyzer.find_divergence_signals(primary, peers) if primary else []
         )
 
         # 4. 财务分析（主标的）
@@ -284,7 +280,7 @@ class Orchestrator:
         }
         await self.reporter.send_report(report_data)
 
-        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+        elapsed = (datetime.now(UTC) - start_time).total_seconds()
         logger.info("%s 报告流程完成，耗时 %.1fs", period, elapsed)
 
     async def close(self) -> None:

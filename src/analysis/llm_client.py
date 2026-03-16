@@ -2,6 +2,7 @@
 统一 LLM 客户端工厂：支持 Claude / Qwen / Kimi / GLM / MiniMax。
 所有非 Claude 提供商均使用 OpenAI 兼容接口（openai SDK + 自定义 base_url）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,18 +13,18 @@ logger = logging.getLogger(__name__)
 
 # ── 提供商默认模型 ──────────────────────────────────────────────
 DEFAULT_MODELS: dict[str, str] = {
-    "claude":  "claude-3-5-sonnet-20241022",
-    "qwen":    "qwen-plus",
-    "kimi":    "moonshot-v1-32k",
-    "glm":     "glm-4-plus",
+    "claude": "claude-3-5-sonnet-20241022",
+    "qwen": "qwen-plus",
+    "kimi": "moonshot-v1-32k",
+    "glm": "glm-4-plus",
     "minimax": "abab6.5s-chat",
 }
 
 # ── OpenAI 兼容接口的 Base URL ──────────────────────────────────
 OPENAI_COMPAT_URLS: dict[str, str] = {
-    "qwen":    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "kimi":    "https://api.moonshot.cn/v1",
-    "glm":     "https://open.bigmodel.cn/api/paas/v4/",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "kimi": "https://api.moonshot.cn/v1",
+    "glm": "https://open.bigmodel.cn/api/paas/v4/",
     "minimax": "https://api.minimax.chat/v1",
 }
 
@@ -55,14 +56,17 @@ class ClaudeClient(BaseLLMClient):
 
     def __init__(self, api_key: str, model: str) -> None:
         import anthropic
+
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
-        self._model  = model
+        self._model = model
 
     @property
-    def provider(self) -> str: return "claude"
+    def provider(self) -> str:
+        return "claude"
 
     @property
-    def model(self) -> str: return self._model
+    def model(self) -> str:
+        return self._model
 
     async def chat(
         self,
@@ -91,19 +95,22 @@ class OpenAICompatClient(BaseLLMClient):
         extra_headers: dict[str, str] | None = None,
     ) -> None:
         from openai import AsyncOpenAI
+
         self._provider = provider
-        self._model    = model
-        self._client   = AsyncOpenAI(
+        self._model = model
+        self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             default_headers=extra_headers or {},
         )
 
     @property
-    def provider(self) -> str: return self._provider
+    def provider(self) -> str:
+        return self._provider
 
     @property
-    def model(self) -> str: return self._model
+    def model(self) -> str:
+        return self._model
 
     async def chat(
         self,
@@ -113,7 +120,7 @@ class OpenAICompatClient(BaseLLMClient):
     ) -> str:
         resp = await self._client.chat.completions.create(
             model=self._model,
-            messages=messages,                    # type: ignore[arg-type]
+            messages=messages,  # type: ignore[arg-type]
             max_tokens=max_tokens,
             temperature=temperature,
         )
@@ -122,12 +129,13 @@ class OpenAICompatClient(BaseLLMClient):
 
 # ── 工厂函数 ────────────────────────────────────────────────────
 
+
 def create_llm_client() -> BaseLLMClient:
     """根据 settings.LLM_PROVIDER 创建对应的 LLM 客户端。"""
     from config.settings import settings
 
     provider = settings.LLM_PROVIDER.lower()
-    model    = settings.LLM_MODEL or DEFAULT_MODELS.get(provider, "")
+    model = settings.LLM_MODEL or DEFAULT_MODELS.get(provider, "")
 
     logger.info("LLM 提供商: %s | 模型: %s", provider, model)
 
@@ -177,7 +185,4 @@ def create_llm_client() -> BaseLLMClient:
             extra_headers={"Authorization": f"Bearer {settings.MINIMAX_API_KEY}"},
         )
 
-    raise ValueError(
-        f"不支持的 LLM 提供商：{provider}，"
-        f"可选：{', '.join(DEFAULT_MODELS.keys())}"
-    )
+    raise ValueError(f"不支持的 LLM 提供商：{provider}，可选：{', '.join(DEFAULT_MODELS.keys())}")

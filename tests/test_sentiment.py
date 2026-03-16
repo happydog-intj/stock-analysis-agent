@@ -93,9 +93,7 @@ class TestSentimentAnalyzer:
             assert "analyzed_at" in result
 
     @pytest.mark.asyncio
-    async def test_analyze_empty_returns_empty(
-        self, analyzer: SentimentAnalyzer
-    ) -> None:
+    async def test_analyze_empty_returns_empty(self, analyzer: SentimentAnalyzer) -> None:
         """测试空输入返回空列表。"""
         results = await analyzer.analyze_batch([])
         assert results == []
@@ -139,9 +137,7 @@ class TestSentimentAnalyzer:
         assert key1 == key2
         assert key1.startswith("sentiment:")
 
-    def test_cache_key_differs_for_different_content(
-        self, analyzer: SentimentAnalyzer
-    ) -> None:
+    def test_cache_key_differs_for_different_content(self, analyzer: SentimentAnalyzer) -> None:
         """测试不同内容生成不同缓存键。"""
         key1 = analyzer._cache_key("内容A")
         key2 = analyzer._cache_key("内容B")
@@ -160,7 +156,9 @@ class TestSentimentAnalyzer:
         mocker.patch.object(
             analyzer,
             "analyze_batch",
-            return_value=[{"content": "test", **mock_result, "analyzed_at": "2025-03-15T10:00:00Z"}],
+            return_value=[
+                {"content": "test", **mock_result, "analyzed_at": "2025-03-15T10:00:00Z"}
+            ],
         )
 
         result = await analyzer.analyze_single("test")

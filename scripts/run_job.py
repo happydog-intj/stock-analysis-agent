@@ -2,6 +2,7 @@
 单次报告执行器：供 GitHub Actions 调用。
 用法：python scripts/run_job.py [morning|noon|close]
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 JOBS = {
     "morning": "src.scheduler.jobs.morning_report",
-    "noon":    "src.scheduler.jobs.noon_report",
-    "close":   "src.scheduler.jobs.close_report",
+    "noon": "src.scheduler.jobs.noon_report",
+    "close": "src.scheduler.jobs.close_report",
 }
 
 
@@ -34,6 +35,7 @@ async def main(period: str) -> None:
     # 动态导入并执行对应任务
     module_path, func_name = JOBS[period].rsplit(".", 1)
     import importlib
+
     module = importlib.import_module(module_path)
     job_fn = getattr(module, func_name)
 

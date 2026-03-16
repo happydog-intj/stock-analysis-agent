@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class CollectorError(Exception):
     """采集器运行时异常基类。"""
+
     pass
 
 
@@ -68,7 +69,8 @@ class BaseCollector(ABC):
             results = await self.collect(since=since)
             self.logger.info(
                 "[%s] 采集完成，%d 条（since=%s）",
-                self.platform, len(results),
+                self.platform,
+                len(results),
                 since.isoformat() if since else "全量",
             )
             return results

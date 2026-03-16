@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import settings
+
+if TYPE_CHECKING:
+    from src.agents.orchestrator import Orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +148,8 @@ def create_scheduler() -> AsyncIOScheduler:
 
 # ── 任务函数 ──────────────────────────────────────────────────────────────────
 
-async def _run_report(orchestrator: "Orchestrator", period: str) -> None:  # type: ignore[name-defined]
+
+async def _run_report(orchestrator: Orchestrator, period: str) -> None:
     """执行完整报告流程。"""
     try:
         await orchestrator.run_report(period=period)
@@ -152,10 +157,11 @@ async def _run_report(orchestrator: "Orchestrator", period: str) -> None:  # typ
         logger.exception("报告任务 [%s] 执行失败: %s", period, e)
 
 
-async def _collect_sentiment(orchestrator: "Orchestrator") -> None:  # type: ignore[name-defined]
+async def _collect_sentiment(orchestrator: Orchestrator) -> None:
     """执行一次舆情采集（雪球 + Reddit）。"""
     try:
         from src.agents.sentiment_agent import SentimentAgent
+
         # TODO: 先采集原始评论，再触发情绪分析
         await orchestrator.xueqiu.run_once()
         await orchestrator.reddit.run_once()
@@ -167,7 +173,7 @@ async def _collect_sentiment(orchestrator: "Orchestrator") -> None:  # type: ign
         logger.exception("舆情采集失败: %s", e)
 
 
-async def _collect_market(orchestrator: "Orchestrator") -> None:  # type: ignore[name-defined]
+async def _collect_market(orchestrator: Orchestrator) -> None:
     """执行一次行情采集。"""
     try:
         await orchestrator.yahoo.run_once()
@@ -175,12 +181,13 @@ async def _collect_market(orchestrator: "Orchestrator") -> None:  # type: ignore
         logger.exception("行情采集失败: %s", e)
 
 
-async def _collect_hkex(orchestrator: "Orchestrator") -> None:  # type: ignore[name-defined]
+async def _collect_hkex(orchestrator: Orchestrator) -> None:
     """执行一次港交所公告采集并触发告警检测。"""
     try:
         announcements = await orchestrator.hkex.run_once()
         if announcements:
             from src.agents.alert_agent import AlertAgent
+
             alert = AlertAgent()
             await alert.check_and_alert([], announcements)
     except Exception as e:
@@ -190,9 +197,11 @@ async def _collect_hkex(orchestrator: "Orchestrator") -> None:  # type: ignore[n
 # ── GitHub Actions 入口函数 ───────────────────────────────────────────────────
 # run_job.py 通过 getattr(module, func_name) 动态调用这三个函数。
 
+
 async def morning_report() -> None:
     """晨报入口（供 GitHub Actions / run_job.py 调用）。"""
     from src.agents.orchestrator import Orchestrator
+
     orchestrator = Orchestrator()
     await orchestrator.run_report(period="morning")
 
@@ -200,6 +209,7 @@ async def morning_report() -> None:
 async def noon_report() -> None:
     """午报入口（供 GitHub Actions / run_job.py 调用）。"""
     from src.agents.orchestrator import Orchestrator
+
     orchestrator = Orchestrator()
     await orchestrator.run_report(period="noon")
 
@@ -207,5 +217,6 @@ async def noon_report() -> None:
 async def close_report() -> None:
     """收盘报入口（供 GitHub Actions / run_job.py 调用）。"""
     from src.agents.orchestrator import Orchestrator
+
     orchestrator = Orchestrator()
     await orchestrator.run_report(period="close")

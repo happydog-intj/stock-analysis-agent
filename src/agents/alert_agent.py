@@ -20,9 +20,9 @@ from src.reporters.feishu import FeishuReporter
 logger = logging.getLogger(__name__)
 
 # 触发告警的阈值
-PRICE_DROP_THRESHOLD = -5.0       # 单日跌幅阈值（%）
+PRICE_DROP_THRESHOLD = -5.0  # 单日跌幅阈值（%）
 SENTIMENT_DROP_THRESHOLD = -20.0  # 情绪骤降阈值（1h内）
-MIN_ANNOUNCEMENT_PRIORITY = 3     # 公告优先级触发阈值
+MIN_ANNOUNCEMENT_PRIORITY = 3  # 公告优先级触发阈值
 
 
 class AlertAgent:
@@ -74,10 +74,7 @@ class AlertAgent:
         for ann in announcements:
             priority = ann.get("priority", 1)
             if priority >= MIN_ANNOUNCEMENT_PRIORITY:
-                msg = (
-                    f"📢 重要公告：{ann.get('title', '未知')} "
-                    f"[优先级: P{priority}]"
-                )
+                msg = f"📢 重要公告：{ann.get('title', '未知')} [优先级: P{priority}]"
                 logger.warning(msg)
                 await self.reporter.send_alert(msg, level="high")
                 alerts.append(msg)
@@ -89,10 +86,7 @@ class AlertAgent:
             if current is not None and previous is not None:
                 drop = current - previous
                 if drop <= SENTIMENT_DROP_THRESHOLD:
-                    msg = (
-                        f"😰 情绪预警：情绪分骤降 {drop:.1f}（"
-                        f"从 {previous:.1f} → {current:.1f}）"
-                    )
+                    msg = f"😰 情绪预警：情绪分骤降 {drop:.1f}（从 {previous:.1f} → {current:.1f}）"
                     logger.warning(msg)
                     await self.reporter.send_alert(msg, level="medium")
                     alerts.append(msg)
