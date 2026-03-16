@@ -10,15 +10,6 @@ yfinance>=0.2.40                # Yahoo Finance 行情数据
 anthropic>=0.30.0               # Claude API
 openai>=1.30.0                  # OpenAI 兼容接口（Qwen / Kimi / GLM / MiniMax）
 
-# ── 数据库 ───────────────────────────────────────────────
-sqlalchemy[asyncio]>=2.0.30
-asyncpg>=0.29.0                 # PostgreSQL 异步驱动
-psycopg2-binary>=2.9.9          # PostgreSQL 同步驱动（迁移脚本用）
-alembic>=1.13.1                 # 数据库迁移
-
-# ── 缓存 ─────────────────────────────────────────────────
-redis[asyncio]>=5.0.4
-
 # ── 调度 ─────────────────────────────────────────────────
 apscheduler>=3.10.4
 

@@ -149,28 +149,14 @@ class RedditCollector(BaseCollector):
         Args:
             since: 只返回该时间点之后发布的帖子。
                    定时任务传入当天 00:00 HKT，仅采集今日评论。
-
-        增量逻辑：
-          1. 以 since（今日起始）作为主过滤条件
-          2. 同时用 Redis last_id（ISO 时间戳）去重，避免同一帖子被重复分析
-          3. 保存最新帖子时间戳作为下次游标
-
-        Returns:
-            今日新帖子列表。
         """
-        last_id = await self.get_last_id()   # ISO 时间戳字符串
-        self.logger.info(
-            "Reddit 采集开始，since=%s，last_captured_at=%s",
-            since.isoformat() if since else "不限",
-            last_id,
-        )
+        self.logger.info("Reddit 采集开始，since=%s", since.isoformat() if since else "全量")
 
-        # 计算 since 的 Unix 时间戳（PRAW 用 created_utc 比较）
         since_ts: float | None = since.timestamp() if since else None
 
         loop = asyncio.get_event_loop()
         try:
-            all_posts = await loop.run_in_executor(
+            posts = await loop.run_in_executor(
                 None, partial(self._sync_collect, since_ts)
             )
         except CollectorError:
@@ -178,18 +164,5 @@ class RedditCollector(BaseCollector):
         except Exception as e:
             raise CollectorError(f"Reddit 采集失败: {e}") from e
 
-        if not all_posts:
-            return []
-
-        # 去重：跳过已记录游标之前的帖子
-        new_posts = [
-            p for p in all_posts
-            if last_id is None or p["captured_at"] > last_id
-        ]
-
-        if new_posts:
-            new_posts.sort(key=lambda p: p["captured_at"])
-            await self.save_last_id(new_posts[-1]["captured_at"])
-
-        self.logger.info("Reddit 采集完成，今日新帖子 %d 条", len(new_posts))
-        return new_posts
+        self.logger.info("Reddit 采集完成，%d 条", len(posts))
+        return posts

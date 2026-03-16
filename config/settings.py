@@ -14,19 +14,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── 数据库 ─────────────────────────────────────────
-    DB_URL: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/stock_agent",
-        description="PostgreSQL 异步连接 URL",
-    )
-    DB_POOL_SIZE: int = 10
-
-    # ── Redis ──────────────────────────────────────────
-    REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis 连接 URL（用于缓存 & 增量 ID）",
-    )
-
     # ── LLM 通用配置 ────────────────────────────────────
     # 支持：claude / qwen / kimi / glm / minimax
     LLM_PROVIDER: str = Field(

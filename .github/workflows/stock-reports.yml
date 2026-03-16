@@ -19,41 +19,11 @@ on:
           - noon
           - close
 
-env:
-  PYTHON_VERSION: '3.11'
-  DB_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/stock_agent
-  REDIS_URL: redis://localhost:6379/0
-
 jobs:
   report:
     name: Generate & Push Report
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER:     postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB:       stock_agent
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       # ── 1. 检出代码 ──────────────────────────────────────────
@@ -61,10 +31,10 @@ jobs:
         uses: actions/checkout@v4
 
       # ── 2. Python 环境 ───────────────────────────────────────
-      - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '3.11'
           cache: pip
 
       - name: 📦 Install dependencies
@@ -72,17 +42,11 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 3. Playwright 浏览器（用于雪球/富途爬虫）───────────────
+      # ── 3. Playwright 浏览器（用于雪球爬虫）──────────────────
       - name: 🌐 Install Playwright browsers
         run: playwright install chromium --with-deps
 
-      # ── 4. 初始化数据库 ──────────────────────────────────────
-      - name: 🗄️ Init database schema
-        run: python scripts/init_db.py
-        env:
-          DB_URL: ${{ env.DB_URL }}
-
-      # ── 5. 判断当前应执行哪个报告 ─────────────────────────────
+      # ── 4. 判断当前应执行哪个报告 ─────────────────────────────
       - name: 🕐 Determine report period
         id: period
         run: |
@@ -94,29 +58,24 @@ jobs:
               01) PERIOD=morning ;;
               04) PERIOD=noon    ;;
               07) PERIOD=close   ;;
-              *)  PERIOD=morning ;;   # fallback
+              *)  PERIOD=morning ;;
             esac
             echo "PERIOD=$PERIOD" >> $GITHUB_OUTPUT
           fi
-          echo "Running period: $(cat $GITHUB_OUTPUT | grep PERIOD)"
 
-      # ── 6. 执行报告任务 ──────────────────────────────────────
+      # ── 5. 执行报告任务 ──────────────────────────────────────
       - name: 📊 Run ${{ steps.period.outputs.PERIOD }} report
         run: python scripts/run_job.py ${{ steps.period.outputs.PERIOD }}
         env:
-          DB_URL:                ${{ env.DB_URL }}
-          REDIS_URL:             ${{ env.REDIS_URL }}
-          # ── LLM 通用（必填其中一个） ──────────────────
-          LLM_PROVIDER:          ${{ secrets.LLM_PROVIDER || 'claude' }}
+          # ── LLM ───────────────────────────────────────────────
+          LLM_PROVIDER:          ${{ secrets.LLM_PROVIDER || 'glm' }}
           LLM_MODEL:             ${{ secrets.LLM_MODEL || '' }}
-          # ── 各提供商 API Key（按需配置）──────────────
           CLAUDE_API_KEY:        ${{ secrets.CLAUDE_API_KEY }}
           QWEN_API_KEY:          ${{ secrets.QWEN_API_KEY }}
           KIMI_API_KEY:          ${{ secrets.KIMI_API_KEY }}
           GLM_API_KEY:           ${{ secrets.GLM_API_KEY }}
           MINIMAX_API_KEY:       ${{ secrets.MINIMAX_API_KEY }}
-          MINIMAX_GROUP_ID:      ${{ secrets.MINIMAX_GROUP_ID }}
-          # ── 其他 ──────────────────────────────────────
+          # ── 数据源 ────────────────────────────────────────────
           FEISHU_WEBHOOK:        ${{ secrets.FEISHU_WEBHOOK }}
           REDDIT_CLIENT_ID:      ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET:  ${{ secrets.REDDIT_CLIENT_SECRET }}
@@ -125,13 +84,11 @@ jobs:
           XUEQIU_COOKIES:        ${{ secrets.XUEQIU_COOKIES }}
           LOG_LEVEL:             INFO
 
-      # ── 7. 上传日志（失败时保留） ─────────────────────────────
+      # ── 6. 上传日志（失败时保留） ─────────────────────────────
       - name: 📁 Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: error-logs-${{ steps.period.outputs.PERIOD }}-${{ github.run_id }}
-          path: |
-            *.log
-            logs/
+          path: "*.log"
           retention-days: 7
