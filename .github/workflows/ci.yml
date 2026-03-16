@@ -1,0 +1,72 @@
+name: 🧪 CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER:     postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB:       stock_agent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff mypy
+
+      - name: 🔍 Lint (ruff)
+        run: ruff check src/ scripts/ config/
+
+      - name: 🗄️ Init test DB
+        run: python scripts/init_db.py
+        env:
+          DB_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/stock_agent_test
+
+      - name: 🧪 Run tests
+        run: pytest tests/ -v --tb=short
+        env:
+          DB_URL:       postgresql+asyncpg://postgres:postgres@localhost:5432/stock_agent_test
+          REDIS_URL:    redis://localhost:6379/1
+          CLAUDE_API_KEY:       ${{ secrets.CLAUDE_API_KEY || 'test-key' }}
+          FEISHU_WEBHOOK:       https://example.com/webhook
+          REDDIT_CLIENT_ID:     test
+          REDDIT_CLIENT_SECRET: test
+          REDDIT_USERNAME:      test
+          REDDIT_PASSWORD:      test

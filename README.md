@@ -104,6 +104,44 @@ python scripts/backfill.py --ticker 1860.HK --days 30
 
 ---
 
+## 🚀 GitHub Actions 部署（推荐）
+
+无需服务器，直接用 GitHub Actions 免费运行，每天自动推送三次报告。
+
+### 1. Fork 本仓库
+
+### 2. 配置 Secrets
+
+进入仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加以下 secrets：
+
+| Secret 名称 | 说明 |
+|------------|------|
+| `CLAUDE_API_KEY` | Anthropic Claude API Key |
+| `FEISHU_WEBHOOK` | 飞书机器人 Webhook URL |
+| `REDDIT_CLIENT_ID` | Reddit App Client ID |
+| `REDDIT_CLIENT_SECRET` | Reddit App Secret |
+| `REDDIT_USERNAME` | Reddit 账号用户名 |
+| `REDDIT_PASSWORD` | Reddit 账号密码 |
+| `XUEQIU_COOKIES` | 雪球登录 Cookie（JSON 字符串） |
+
+### 3. 启用 Workflow
+
+进入仓库 **Actions** 标签页 → 启用 Workflows。
+
+### 4. 触发时间（自动）
+
+| Workflow | Cron (UTC) | HKT 时间 |
+|---------|-----------|---------|
+| 晨报 | `0 1 * * 1-5` | 周一至周五 09:00 |
+| 午报 | `0 4 * * 1-5` | 周一至周五 12:00 |
+| 收盘报 | `0 7 * * 1-5` | 周一至周五 15:00 |
+
+### 5. 手动触发（测试）
+
+Actions → **📊 Stock Reports** → **Run workflow** → 选择报告类型 → Run。
+
+---
+
 ## 配置说明
 
 | 变量 | 说明 | 示例 |

@@ -1,0 +1,127 @@
+name: 📊 Stock Reports (汇量科技 1860.HK)
+
+on:
+  schedule:
+    # HKT = UTC+8，港股交易日 Mon-Fri
+    - cron: '0 1 * * 1-5'   # 09:00 HKT 晨报
+    - cron: '0 4 * * 1-5'   # 12:00 HKT 午报
+    - cron: '0 7 * * 1-5'   # 15:00 HKT 收盘报
+
+  workflow_dispatch:
+    inputs:
+      period:
+        description: '手动指定报告类型'
+        required: true
+        default: morning
+        type: choice
+        options:
+          - morning
+          - noon
+          - close
+
+env:
+  PYTHON_VERSION: '3.11'
+  DB_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/stock_agent
+  REDIS_URL: redis://localhost:6379/0
+
+jobs:
+  report:
+    name: Generate & Push Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER:     postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB:       stock_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      # ── 1. 检出代码 ──────────────────────────────────────────
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Python 环境 ───────────────────────────────────────
+      - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 3. Playwright 浏览器（用于雪球/富途爬虫）───────────────
+      - name: 🌐 Install Playwright browsers
+        run: playwright install chromium --with-deps
+
+      # ── 4. 初始化数据库 ──────────────────────────────────────
+      - name: 🗄️ Init database schema
+        run: python scripts/init_db.py
+        env:
+          DB_URL: ${{ env.DB_URL }}
+
+      # ── 5. 判断当前应执行哪个报告 ─────────────────────────────
+      - name: 🕐 Determine report period
+        id: period
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "PERIOD=${{ inputs.period }}" >> $GITHUB_OUTPUT
+          else
+            HOUR=$(date -u +%H)
+            case $HOUR in
+              01) PERIOD=morning ;;
+              04) PERIOD=noon    ;;
+              07) PERIOD=close   ;;
+              *)  PERIOD=morning ;;   # fallback
+            esac
+            echo "PERIOD=$PERIOD" >> $GITHUB_OUTPUT
+          fi
+          echo "Running period: $(cat $GITHUB_OUTPUT | grep PERIOD)"
+
+      # ── 6. 执行报告任务 ──────────────────────────────────────
+      - name: 📊 Run ${{ steps.period.outputs.PERIOD }} report
+        run: python scripts/run_job.py ${{ steps.period.outputs.PERIOD }}
+        env:
+          DB_URL:                ${{ env.DB_URL }}
+          REDIS_URL:             ${{ env.REDIS_URL }}
+          CLAUDE_API_KEY:        ${{ secrets.CLAUDE_API_KEY }}
+          FEISHU_WEBHOOK:        ${{ secrets.FEISHU_WEBHOOK }}
+          REDDIT_CLIENT_ID:      ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET:  ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME:       ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD:       ${{ secrets.REDDIT_PASSWORD }}
+          XUEQIU_COOKIES:        ${{ secrets.XUEQIU_COOKIES }}
+          LOG_LEVEL:             INFO
+
+      # ── 7. 上传日志（失败时保留） ─────────────────────────────
+      - name: 📁 Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs-${{ steps.period.outputs.PERIOD }}-${{ github.run_id }}
+          path: |
+            *.log
+            logs/
+          retention-days: 7
