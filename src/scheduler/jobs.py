@@ -185,3 +185,27 @@ async def _collect_hkex(orchestrator: "Orchestrator") -> None:  # type: ignore[n
             await alert.check_and_alert([], announcements)
     except Exception as e:
         logger.exception("HKEX 采集失败: %s", e)
+
+
+# ── GitHub Actions 入口函数 ───────────────────────────────────────────────────
+# run_job.py 通过 getattr(module, func_name) 动态调用这三个函数。
+
+async def morning_report() -> None:
+    """晨报入口（供 GitHub Actions / run_job.py 调用）。"""
+    from src.agents.orchestrator import Orchestrator
+    orchestrator = Orchestrator()
+    await orchestrator.run_report(period="morning")
+
+
+async def noon_report() -> None:
+    """午报入口（供 GitHub Actions / run_job.py 调用）。"""
+    from src.agents.orchestrator import Orchestrator
+    orchestrator = Orchestrator()
+    await orchestrator.run_report(period="noon")
+
+
+async def close_report() -> None:
+    """收盘报入口（供 GitHub Actions / run_job.py 调用）。"""
+    from src.agents.orchestrator import Orchestrator
+    orchestrator = Orchestrator()
+    await orchestrator.run_report(period="close")
