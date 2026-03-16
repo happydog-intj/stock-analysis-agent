@@ -1,147 +1,269 @@
 """
-情绪分析模块：使用 LLM 对评论进行批量情绪评分。
+src/analysis/sentiment.py — Claude API 情绪分析引擎
 
-无状态设计：不依赖 Redis/数据库，直接调用 LLM。
+批量分析评论/帖子文本，输出：
+  - score:      情绪分 -100（极度悲观） ~ +100（极度乐观）
+  - sentiment:  情绪标签（very_bullish / bullish / neutral / bearish / very_bearish）
+  - topics:     提炼的主题列表（如 ["广告收入", "回购", "Mintegral增速"]）
+  - confidence: 分析置信度 0 ~ 1.0
+
+缓存策略：
+  - 使用 Redis 对相同内容的分析结果缓存 1 小时（避免重复调用 API）
+  - 缓存键：sha256(content)[:16]
 """
+
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
 
-from src.analysis.llm_client import BaseLLMClient, create_llm_client
+import anthropic
+import redis.asyncio as aioredis
+
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-SENTIMENT_PROMPT = """你是一位专业的港股投资情绪分析师。请分析以下股票评论的情绪倾向。
+# Claude 系统 Prompt：角色定义与输出格式约束
+SYSTEM_PROMPT = """你是一位专业的港股市场情绪分析师，专注于汇量科技（汇量科技集团，股票代码 1860.HK，品牌 Mobvista/Mintegral）。
 
-股票代码：{ticker}
-平台：{platform}
+你的任务是分析给定的中英文评论文本，判断其对汇量科技股价的情绪倾向。
 
-评论列表（JSON 数组）：
-{comments}
+## 输出格式（严格 JSON，不要有任何 markdown 包裹）
 
-请对每条评论输出以下 JSON 结构（数组，顺序与输入对应）：
-[
-  {{
-    "score": <整数，-100（极度悲观）到 100（极度乐观）>,
-    "sentiment": "<bullish | bearish | neutral>",
-    "topics": ["<话题1>", "<话题2>"],
-    "confidence": <0.0 到 1.0 的浮点数>
-  }}
-]
+{
+  "results": [
+    {
+      "index": 0,
+      "score": 65,
+      "sentiment": "bullish",
+      "topics": ["广告收入增长", "Mintegral市占率"],
+      "confidence": 0.85,
+      "reasoning": "简短说明判断依据（中文，50字内）"
+    }
+  ]
+}
 
-评分参考：
-- 80~100：强烈看多，充满信心
-- 40~79 ：偏多，有一定正面预期
-- -39~39：中性，观望或信息不足
-- -79~-40：偏空，有担忧
-- -100~-80：强烈看空，非常悲观
+## 评分规则
 
-话题分类参考（选最相关的 1-3 个）：
-revenue（营收）/ competition（竞争）/ valuation（估值）/ guidance（展望）/
-management（管理层）/ dividend（分红）/ product（产品）/ macro（宏观）
+| 分值范围    | sentiment 标签  | 含义           |
+|------------|-----------------|----------------|
+| 70 ~ 100   | very_bullish    | 强烈看多       |
+| 30 ~ 69    | bullish         | 看多           |
+| -29 ~ 29   | neutral         | 中性           |
+| -69 ~ -30  | bearish         | 看空           |
+| -100 ~ -70 | very_bearish    | 强烈看空       |
 
-只输出 JSON 数组，不要任何额外说明。"""
-
-
-@dataclass
-class SentimentResult:
-    score:       float            # -100 ~ 100
-    sentiment:   str              # bullish / bearish / neutral
-    topics:      list[str]
-    confidence:  float            # 0.0 ~ 1.0
-    raw_comment: str = field(default="", repr=False)
+## 注意事项
+- 只分析与汇量科技/程序化广告行业相关的内容
+- 无关内容输出 score=0, sentiment=neutral, confidence=0.1
+- topics 最多 3 个，每个不超过 10 字
+"""
 
 
 class SentimentAnalyzer:
-    """批量情绪分析器（无状态，直接调用 LLM）。"""
+    """
+    基于 Claude API 的情绪分析器，带 Redis 缓存。
 
-    BATCH_SIZE = 20
+    用法::
+        analyzer = SentimentAnalyzer()
+        results = await analyzer.analyze_batch(comments)
+    """
 
-    def __init__(self, llm_client: BaseLLMClient | None = None) -> None:
-        self._llm = llm_client or create_llm_client()
-        logger.info("SentimentAnalyzer 使用 [%s/%s]", self._llm.provider, self._llm.model)
+    def __init__(self) -> None:
+        self._client: anthropic.AsyncAnthropic | None = None
+        self._redis: aioredis.Redis | None = None
 
-    async def _call_llm(
-        self,
-        comments: list[str],
-        ticker: str,
-        platform: str,
-    ) -> list[SentimentResult]:
-        prompt = SENTIMENT_PROMPT.format(
-            ticker=ticker,
-            platform=platform,
-            comments=json.dumps(comments, ensure_ascii=False, indent=2),
-        )
-        try:
-            text = await self._llm.chat(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2048,
-                temperature=0.2,
+    def _get_client(self) -> anthropic.AsyncAnthropic:
+        """懒初始化 Anthropic 客户端。"""
+        if self._client is None:
+            if not settings.claude_api_key:
+                raise RuntimeError("CLAUDE_API_KEY 未配置")
+            self._client = anthropic.AsyncAnthropic(api_key=settings.claude_api_key)
+        return self._client
+
+    async def _get_redis(self) -> aioredis.Redis:
+        """懒初始化 Redis 连接。"""
+        if self._redis is None:
+            self._redis = await aioredis.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
             )
-            parsed: list[dict] = json.loads(text)
-            return [
-                SentimentResult(
-                    score=float(item.get("score", 0)),
-                    sentiment=item.get("sentiment", "neutral"),
-                    topics=item.get("topics", []),
-                    confidence=float(item.get("confidence", 0.5)),
-                    raw_comment=comments[i],
-                )
-                for i, item in enumerate(parsed)
-            ]
+        return self._redis
+
+    @staticmethod
+    def _cache_key(content: str) -> str:
+        """生成内容的缓存键（SHA256 前 16 位）。"""
+        return "sentiment:" + hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    async def _get_cached(self, content: str) -> dict[str, Any] | None:
+        """
+        从 Redis 缓存读取已分析结果。
+
+        Returns:
+            缓存命中返回结果字典，否则返回 None
+        """
+        try:
+            redis = await self._get_redis()
+            cached = await redis.get(self._cache_key(content))
+            if cached:
+                return json.loads(cached)
         except Exception as e:
-            logger.error("LLM 调用失败: %s", e)
-            # 失败时返回中性结果，不阻断流程
+            logger.warning("读取缓存失败: %s", e)
+        return None
+
+    async def _set_cached(self, content: str, result: dict[str, Any]) -> None:
+        """将分析结果写入 Redis 缓存。"""
+        try:
+            redis = await self._get_redis()
+            await redis.setex(
+                self._cache_key(content),
+                settings.redis_cache_ttl,
+                json.dumps(result, ensure_ascii=False),
+            )
+        except Exception as e:
+            logger.warning("写入缓存失败: %s", e)
+
+    async def _call_claude(self, texts: list[str]) -> list[dict[str, Any]]:
+        """
+        批量调用 Claude API 分析情绪。
+
+        Args:
+            texts: 待分析文本列表（最多 batch_size 条）
+
+        Returns:
+            与 texts 等长的分析结果列表
+
+        TODO: 实现 token 计数，防止超过上下文窗口限制
+        TODO: 添加指数退避重试（anthropic.RateLimitError）
+        TODO: 支持 streaming 模式以减少首字节延迟
+        """
+        client = self._get_client()
+
+        # 构造批量分析的用户消息
+        user_content = "请分析以下评论，按 JSON 格式输出：\n\n"
+        for i, text in enumerate(texts):
+            user_content += f"[{i}] {text[:500]}\n\n"  # 截断超长文本
+
+        try:
+            response = await client.messages.create(
+                model=settings.claude_model,
+                max_tokens=settings.claude_max_tokens,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_content}],
+            )
+
+            # 解析 Claude 返回的 JSON
+            raw_text = response.content[0].text.strip()
+            # TODO: 更健壮的 JSON 提取（处理 Claude 偶发的 markdown 包裹）
+            data = json.loads(raw_text)
+            return data.get("results", [])
+
+        except json.JSONDecodeError as e:
+            logger.error("Claude 响应 JSON 解析失败: %s", e)
+            # 降级：为所有输入返回中性结果
             return [
-                SentimentResult(score=0, sentiment="neutral", topics=[], confidence=0.0, raw_comment=c)
-                for c in comments
+                {
+                    "index": i,
+                    "score": 0,
+                    "sentiment": "neutral",
+                    "topics": [],
+                    "confidence": 0.0,
+                    "reasoning": "解析失败",
+                }
+                for i in range(len(texts))
             ]
 
     async def analyze_batch(
         self,
-        comments: list[str],
-        ticker: str = "1860.HK",
-        platform: str = "unknown",
-    ) -> list[SentimentResult]:
-        """批量分析评论情绪，按 BATCH_SIZE 分批调用 LLM。"""
-        if not comments:
+        records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        批量分析评论情绪，自动分批（每批 batch_size 条）并利用缓存。
+
+        Args:
+            records: 含 content 字段的评论字典列表
+
+        Returns:
+            为每条记录添加了情绪分析字段的新列表：
+              score, sentiment, topics, confidence, analyzed_at
+
+        Example::
+            results = await analyzer.analyze_batch([
+                {"content": "Mintegral 增速超预期，看好明年业绩", ...},
+                {"content": "广告行业整体低迷，1860 压力大", ...},
+            ])
+        """
+        if not records:
             return []
 
-        logger.info("情绪分析 | [%s] %d 条评论，分 %d 批",
-                    platform, len(comments), -(-len(comments) // self.BATCH_SIZE))
+        batch_size = settings.claude_batch_size
+        enriched: list[dict[str, Any]] = []
 
-        results: list[SentimentResult] = []
-        for batch_start in range(0, len(comments), self.BATCH_SIZE):
-            batch = comments[batch_start : batch_start + self.BATCH_SIZE]
-            batch_results = await self._call_llm(batch, ticker, platform)
-            results.extend(batch_results)
+        for batch_start in range(0, len(records), batch_size):
+            batch = records[batch_start : batch_start + batch_size]
+            texts = [r.get("content", "") for r in batch]
 
-        return results
+            # 检查缓存
+            cached_results: dict[int, dict[str, Any]] = {}
+            uncached_indices: list[int] = []
 
-    @staticmethod
-    def aggregate(
-        results: list[SentimentResult],
-        platform_weight: float = 1.0,
-    ) -> dict:
-        """聚合多条评论的情绪分数。"""
-        if not results:
-            return {"avg_score": 0.0, "distribution": {}, "top_topics": []}
+            for i, text in enumerate(texts):
+                cached = await self._get_cached(text)
+                if cached:
+                    cached_results[i] = cached
+                else:
+                    uncached_indices.append(i)
 
-        weighted_scores = [r.score * r.confidence * platform_weight for r in results]
-        avg = sum(weighted_scores) / len(weighted_scores)
+            # 仅对未缓存的内容调用 Claude
+            api_results: dict[int, dict[str, Any]] = {}
+            if uncached_indices:
+                uncached_texts = [texts[i] for i in uncached_indices]
+                logger.info(
+                    "调用 Claude 分析 %d 条（共 %d 条，%d 条命中缓存）",
+                    len(uncached_texts),
+                    len(texts),
+                    len(cached_results),
+                )
+                raw_results = await self._call_claude(uncached_texts)
+                for j, result in enumerate(raw_results):
+                    orig_idx = uncached_indices[j]
+                    api_results[orig_idx] = result
+                    # 写入缓存
+                    await self._set_cached(texts[orig_idx], result)
 
-        dist: dict[str, int] = {"bullish": 0, "neutral": 0, "bearish": 0}
-        topic_counts: dict[str, int] = {}
-        for r in results:
-            dist[r.sentiment] = dist.get(r.sentiment, 0) + 1
-            for t in r.topics:
-                topic_counts[t] = topic_counts.get(t, 0) + 1
+            # 合并结果并回填到原始记录
+            for i, record in enumerate(batch):
+                analysis = cached_results.get(i) or api_results.get(i, {})
+                enriched_record = {
+                    **record,
+                    "score": analysis.get("score"),
+                    "sentiment": analysis.get("sentiment"),
+                    "topics": analysis.get("topics", []),
+                    "confidence": analysis.get("confidence"),
+                    "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                enriched.append(enriched_record)
 
-        top_topics = sorted(topic_counts.items(), key=lambda x: -x[1])[:5]
-        return {
-            "avg_score": round(avg, 2),
-            "distribution": dist,
-            "top_topics": [{"topic": t, "count": c} for t, c in top_topics],
-        }
+        logger.info("情绪分析完成，共 %d 条记录", len(enriched))
+        return enriched
+
+    async def analyze_single(self, content: str) -> dict[str, Any]:
+        """
+        分析单条文本。
+
+        Returns:
+            单条分析结果字典。
+        """
+        results = await self.analyze_batch([{"content": content}])
+        return results[0] if results else {}
+
+    async def close(self) -> None:
+        """释放资源。"""
+        if self._redis:
+            await self._redis.aclose()
+            self._redis = None
