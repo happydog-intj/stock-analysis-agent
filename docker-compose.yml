@@ -1,0 +1,55 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 股票分析 Agent — 本地基础设施
+# PostgreSQL 15 + Redis 7，均配置持久化 Volume
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL 15 ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: stockdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stockuser
+      POSTGRES_PASSWORD: stockpass
+      POSTGRES_DB: stockdb
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/db/migrations:/docker-entrypoint-initdb.d:ro  # 自动执行初始化 SQL
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockuser -d stockdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis 7 ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: stockredis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
