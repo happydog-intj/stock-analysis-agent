@@ -114,15 +114,21 @@ python scripts/backfill.py --ticker 1860.HK --days 30
 
 进入仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加以下 secrets：
 
-| Secret 名称 | 说明 |
-|------------|------|
-| `CLAUDE_API_KEY` | Anthropic Claude API Key |
-| `FEISHU_WEBHOOK` | 飞书机器人 Webhook URL |
-| `REDDIT_CLIENT_ID` | Reddit App Client ID |
-| `REDDIT_CLIENT_SECRET` | Reddit App Secret |
-| `REDDIT_USERNAME` | Reddit 账号用户名 |
-| `REDDIT_PASSWORD` | Reddit 账号密码 |
-| `XUEQIU_COOKIES` | 雪球登录 Cookie（JSON 字符串） |
+| Secret 名称 | 必填 | 说明 |
+|------------|------|------|
+| `LLM_PROVIDER` | ✅ | 选择模型：`claude` / `qwen` / `kimi` / `glm` / `minimax` |
+| `LLM_MODEL` | 可选 | 指定模型名，留空用默认值 |
+| `CLAUDE_API_KEY` | 按需 | Anthropic API Key（LLM_PROVIDER=claude 时填） |
+| `QWEN_API_KEY` | 按需 | 阿里云 DashScope Key（LLM_PROVIDER=qwen 时填） |
+| `KIMI_API_KEY` | 按需 | Moonshot Kimi Key（LLM_PROVIDER=kimi 时填） |
+| `GLM_API_KEY` | 按需 | 智谱 GLM Key（LLM_PROVIDER=glm 时填） |
+| `MINIMAX_API_KEY` | 按需 | MiniMax Key（LLM_PROVIDER=minimax 时填） |
+| `FEISHU_WEBHOOK` | ✅ | 飞书机器人 Webhook URL |
+| `REDDIT_CLIENT_ID` | ✅ | Reddit App Client ID |
+| `REDDIT_CLIENT_SECRET` | ✅ | Reddit App Secret |
+| `REDDIT_USERNAME` | ✅ | Reddit 账号用户名 |
+| `REDDIT_PASSWORD` | ✅ | Reddit 账号密码 |
+| `XUEQIU_COOKIES` | ✅ | 雪球登录 Cookie（JSON 字符串） |
 
 ### 3. 启用 Workflow
 

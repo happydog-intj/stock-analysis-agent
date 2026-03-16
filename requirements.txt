@@ -8,6 +8,7 @@ yfinance>=0.2.40                # Yahoo Finance 行情数据
 
 # ── AI / LLM ────────────────────────────────────────────
 anthropic>=0.30.0               # Claude API
+openai>=1.30.0                  # OpenAI 兼容接口（Qwen / Kimi / GLM / MiniMax）
 
 # ── 数据库 ───────────────────────────────────────────────
 sqlalchemy[asyncio]>=2.0.30

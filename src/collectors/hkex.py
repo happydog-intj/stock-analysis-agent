@@ -1,154 +1,192 @@
 """
-港交所公告监听器：轮询 HKEX EPS，检测 1860 新公告并分类。
+src/collectors/hkex.py — 港交所披露易公告采集器
+
+轮询港交所披露易（HKEXnews）API，获取汇量科技（股票代码 01860）
+的最新公告，自动识别公告类型并打优先级。
+
+API 端点（非官方，可能变更）：
+    https://www1.hkexnews.hk/listedco/listconews/advancedsearch/search_active_main.aspx
+    JSON API: https://www1.hkexnews.hk/listedco/listconews/advancedsearch/json/...
+
+注意：港交所无公开官方 API，此处使用反向工程的内部接口。
+TODO: 如港交所开放官方 API，迁移至官方接口。
 """
+
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import datetime
-from enum import Enum
+from datetime import datetime, timezone
+from typing import Any
 
 import httpx
-import redis.asyncio as aioredis
 
 from config.settings import settings
+from src.collectors.base import BaseCollector, CollectorError
 
 logger = logging.getLogger(__name__)
 
-HKEX_SEARCH_URL = (
-    "https://www1.hkexnews.hk/search/titlesearch.xhtml"
-    "?lang=zh&category=0&market=MAINBOARD&searchType=1"
-    "&documentNo=&stockCode={stock_code}&headline=&dateFrom=&dateTo="
-    "&t1code=40000&t2Gcode=-2&t2code=-2&rowRange=20&btnSearch.x=48&btnSearch.y=10"
+# 港交所披露易公告搜索 API（内部接口，可能失效）
+HKEX_API_URL = (
+    "https://www1.hkexnews.hk/listedco/listconews/advancedsearch/json/"
+    "GetAnnouncement.aspx"
 )
 
-
-class AnnouncementPriority(str, Enum):
-    HIGH   = "high"
-    MEDIUM = "medium"
-    LOW    = "low"
-
-
-class AnnouncementType(str, Enum):
-    PROFIT_WARNING  = "profit_warning"
-    RESULTS         = "results"
-    SHAREHOLDING    = "shareholding"
-    MANAGEMENT      = "management"
-    GENERAL         = "general"
-
-
-CLASSIFICATION_RULES: list[tuple[list[str], AnnouncementType, AnnouncementPriority]] = [
-    (["盈利警告", "正面盈利", "profit warning"],   AnnouncementType.PROFIT_WARNING,  AnnouncementPriority.HIGH),
-    (["中期业绩", "全年业绩", "interim results", "annual results"],
-                                                    AnnouncementType.RESULTS,         AnnouncementPriority.MEDIUM),
-    (["主要股东", "股权", "持股", "major shareholder"],
-                                                    AnnouncementType.SHAREHOLDING,    AnnouncementPriority.HIGH),
-    (["董事", "行政总裁", "chief executive", "director"],
-                                                    AnnouncementType.MANAGEMENT,      AnnouncementPriority.MEDIUM),
+# 公告类型关键词映射（优先级打标）
+ANNOUNCEMENT_RULES: list[dict[str, Any]] = [
+    {
+        "keywords": ["业绩", "盈利警告", "中期业绩", "年度业绩", "Profit Warning", "Results"],
+        "type": "earnings",
+        "priority": 3,
+    },
+    {
+        "keywords": ["回购", "购回", "Share Repurchase", "Buyback"],
+        "type": "buyback",
+        "priority": 2,
+    },
+    {
+        "keywords": ["股权变动", "股东权益", "持股", "Shareholding", "Disclosure of Interest"],
+        "type": "shareholding",
+        "priority": 2,
+    },
+    {
+        "keywords": ["派息", "股息", "Dividend", "Distribution"],
+        "type": "dividend",
+        "priority": 2,
+    },
+    {
+        "keywords": ["董事", "行政总裁", "CEO", "CFO", "管理层变动", "Director", "Appointment"],
+        "type": "management",
+        "priority": 2,
+    },
 ]
 
-
-@dataclass
-class HKEXAnnouncement:
-    ticker:       str
-    title:        str
-    type:         AnnouncementType
-    priority:     AnnouncementPriority
-    url:          str
-    published_at: datetime
-    doc_id:       str
+DEFAULT_TYPE = "general"
+DEFAULT_PRIORITY = 1
 
 
-class HKEXCollector:
-    """港交所公告监听器。"""
+def classify_announcement(title: str) -> tuple[str, int]:
+    """
+    根据公告标题文本识别类型并返回优先级。
 
-    STOCK_CODE = "1860"
+    Args:
+        title: 公告标题字符串（中英文均支持）
 
-    def __init__(self) -> None:
-        self._redis: aioredis.Redis | None = None
+    Returns:
+        (announcement_type, priority) 元组
 
-    async def _get_redis(self) -> aioredis.Redis:
-        if self._redis is None:
-            self._redis = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-        return self._redis
+    TODO: 引入 NLP 分类器提升准确率
+    """
+    title_lower = title.lower()
+    for rule in ANNOUNCEMENT_RULES:
+        if any(kw.lower() in title_lower for kw in rule["keywords"]):
+            return rule["type"], rule["priority"]
+    return DEFAULT_TYPE, DEFAULT_PRIORITY
 
-    async def _get_seen_ids(self) -> set[str]:
-        r = await self._get_redis()
-        members = await r.smembers(f"hkex:seen:{self.STOCK_CODE}")
-        return set(members)
 
-    async def _mark_seen(self, doc_id: str) -> None:
-        r = await self._get_redis()
-        await r.sadd(f"hkex:seen:{self.STOCK_CODE}", doc_id)
-        await r.expire(f"hkex:seen:{self.STOCK_CODE}", 86400 * 30)  # 30 天
+class HKEXCollector(BaseCollector):
+    """
+    港交所披露易公告采集器。
 
-    def _classify(self, title: str) -> tuple[AnnouncementType, AnnouncementPriority]:
-        title_lower = title.lower()
-        for keywords, ann_type, priority in CLASSIFICATION_RULES:
-            if any(kw.lower() in title_lower for kw in keywords):
-                return ann_type, priority
-        return AnnouncementType.GENERAL, AnnouncementPriority.LOW
+    增量策略：记录最后一条公告的发布时间戳。
+    """
 
-    async def poll(self) -> list[HKEXAnnouncement]:
-        """拉取最新公告，返回未见过的新公告。"""
-        seen_ids = await self._get_seen_ids()
-        new_announcements: list[HKEXAnnouncement] = []
+    platform = "hkex"
+    STOCK_CODE = "01860"  # 汇量科技港股代码
 
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                url = HKEX_SEARCH_URL.format(stock_code=self.STOCK_CODE)
-                resp = await client.get(url, follow_redirects=True)
-                resp.raise_for_status()
-                items = self._parse_response(resp.text)
+    async def _fetch_announcements(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
+        """
+        通过港交所披露易接口获取公告列表。
 
-            for item in items:
-                if item["doc_id"] in seen_ids:
-                    continue
+        TODO: 实现真实的接口调用，当前为 mock 占位
+        TODO: 处理分页（港交所每页最多 20 条）
+        TODO: 添加 Retry-After 支持和指数退避
+        """
+        # TODO: 替换为真实 API 请求
+        # 示例请求（需逆向工程实际参数）：
+        # params = {
+        #     "lang": "ZH",
+        #     "stock_code": self.STOCK_CODE,
+        #     "date_from": "",
+        #     "date_to": "",
+        #     "category": "0",
+        # }
+        # resp = await client.get(HKEX_API_URL, params=params)
+        # data = resp.json()
 
-                ann_type, priority = self._classify(item["title"])
-                ann = HKEXAnnouncement(
-                    ticker=self.STOCK_CODE,
-                    title=item["title"],
-                    type=ann_type,
-                    priority=priority,
-                    url=item["url"],
-                    published_at=item["date"],
-                    doc_id=item["doc_id"],
-                )
-                new_announcements.append(ann)
-                await self._mark_seen(item["doc_id"])
+        # ─── 临时 Mock 数据（待替换）───────────────────────────────────────
+        logger.warning("HKEXCollector: 使用 Mock 数据，请实现真实 API 采集逻辑")
+        return [
+            {
+                "id": "mock-001",
+                "title": "汇量科技集团有限公司 — 2024年度业绩公告",
+                "published_at": "2025-03-15T08:30:00+08:00",
+                "url": f"https://www1.hkexnews.hk/listedco/listconews/{self.STOCK_CODE}/mock",
+            },
+            {
+                "id": "mock-002",
+                "title": "Purchase of Shares under Share Repurchase Mandate",
+                "published_at": "2025-03-14T09:00:00+08:00",
+                "url": f"https://www1.hkexnews.hk/listedco/listconews/{self.STOCK_CODE}/mock2",
+            },
+        ]
 
-        except Exception as e:
-            logger.error("港交所公告拉取失败: %s", e, exc_info=True)
+    async def collect(self) -> list[dict[str, Any]]:
+        """
+        执行一次港交所公告采集。
 
-        if new_announcements:
-            logger.info("港交所：发现 %d 条新公告", len(new_announcements))
-        return new_announcements
+        Returns:
+            新增公告列表（统一格式）。
+        """
+        last_id = await self.get_last_id()
+        self.logger.info("HKEX 采集开始，last_id=%s", last_id)
 
-    def _parse_response(self, html: str) -> list[dict]:
-        """解析 HKEX 搜索结果页面（简单 HTML 解析）。"""
-        from html.parser import HTMLParser
-        import re
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={"User-Agent": "Mozilla/5.0 StockBot/1.0"},
+            follow_redirects=True,
+        ) as client:
+            raw_list = await self._fetch_announcements(client)
 
-        results = []
-        # 匹配公告条目（实际生产中应更健壮）
-        pattern = re.compile(
-            r'<td[^>]*class="[^"]*news-title[^"]*"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>.*?'
-            r'<td[^>]*class="[^"]*news-date[^"]*"[^>]*>([^<]+)</td>',
-            re.DOTALL,
-        )
-        for m in pattern.finditer(html):
-            href, title, date_str = m.group(1), m.group(2).strip(), m.group(3).strip()
-            doc_id = href.split("/")[-1].replace(".pdf", "")
-            try:
-                date = datetime.strptime(date_str, "%d/%m/%Y")
-            except ValueError:
-                date = datetime.utcnow()
+        results: list[dict[str, Any]] = []
+        new_last_id: str | None = None
 
-            results.append({
-                "doc_id": doc_id,
-                "title":  title,
-                "url":    f"https://www1.hkexnews.hk{href}",
-                "date":   date,
-            })
+        for raw in raw_list:
+            ann_id = raw.get("id", "")
+
+            # 增量过滤（按 ID 或时间戳去重）
+            if last_id and ann_id <= last_id:
+                continue
+
+            title = raw.get("title", "")
+            ann_type, priority = classify_announcement(title)
+
+            parsed: dict[str, Any] = {
+                "platform": self.platform,
+                "ticker": settings.primary_ticker,
+                "external_id": ann_id,
+                "title": title,
+                "announcement_type": ann_type,
+                "priority": priority,
+                "url": raw.get("url", ""),
+                "published_at": raw.get("published_at", datetime.now(timezone.utc).isoformat()),
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+            }
+            results.append(parsed)
+
+            if new_last_id is None:
+                new_last_id = ann_id
+
+        if new_last_id:
+            await self.save_last_id(new_last_id)
+
+        # 高优先级公告立即触发 alert
+        high_priority = [r for r in results if r.get("priority", 1) >= 3]
+        if high_priority:
+            self.logger.warning(
+                "发现 %d 条高优先级公告！%s",
+                len(high_priority),
+                [r["title"] for r in high_priority],
+            )
+
+        self.logger.info("HKEX 采集完成，新公告 %d 条", len(results))
         return results

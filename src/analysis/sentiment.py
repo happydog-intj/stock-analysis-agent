@@ -8,10 +8,10 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-import anthropic
 import redis.asyncio as aioredis
 
 from config.settings import settings
+from src.analysis.llm_client import BaseLLMClient, create_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,15 @@ class SentimentResult:
 
 
 class SentimentAnalyzer:
-    """批量情绪分析器（Claude API + Redis 缓存）。"""
+    """批量情绪分析器（多 LLM 提供商 + Redis 缓存）。"""
 
     BATCH_SIZE = 20
     CACHE_TTL  = 86400  # 24 小时
 
-    def __init__(self) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=settings.CLAUDE_API_KEY)
+    def __init__(self, llm_client: BaseLLMClient | None = None) -> None:
+        self._llm    = llm_client or create_llm_client()
         self._redis: aioredis.Redis | None = None
+        logger.info("SentimentAnalyzer 使用 [%s/%s]", self._llm.provider, self._llm.model)
 
     async def _get_redis(self) -> aioredis.Redis:
         if self._redis is None:
@@ -111,12 +112,11 @@ class SentimentAnalyzer:
             comments=json.dumps(comments, ensure_ascii=False, indent=2),
         )
         try:
-            resp = await self._client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=2048,
+            text = await self._llm.chat(
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,
+                temperature=0.2,
             )
-            text = resp.content[0].text.strip()
             parsed: list[dict] = json.loads(text)
             return [
                 SentimentResult(

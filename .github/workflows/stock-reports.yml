@@ -106,7 +106,17 @@ jobs:
         env:
           DB_URL:                ${{ env.DB_URL }}
           REDIS_URL:             ${{ env.REDIS_URL }}
+          # ── LLM 通用（必填其中一个） ──────────────────
+          LLM_PROVIDER:          ${{ secrets.LLM_PROVIDER || 'claude' }}
+          LLM_MODEL:             ${{ secrets.LLM_MODEL || '' }}
+          # ── 各提供商 API Key（按需配置）──────────────
           CLAUDE_API_KEY:        ${{ secrets.CLAUDE_API_KEY }}
+          QWEN_API_KEY:          ${{ secrets.QWEN_API_KEY }}
+          KIMI_API_KEY:          ${{ secrets.KIMI_API_KEY }}
+          GLM_API_KEY:           ${{ secrets.GLM_API_KEY }}
+          MINIMAX_API_KEY:       ${{ secrets.MINIMAX_API_KEY }}
+          MINIMAX_GROUP_ID:      ${{ secrets.MINIMAX_GROUP_ID }}
+          # ── 其他 ──────────────────────────────────────
           FEISHU_WEBHOOK:        ${{ secrets.FEISHU_WEBHOOK }}
           REDDIT_CLIENT_ID:      ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET:  ${{ secrets.REDDIT_CLIENT_SECRET }}
