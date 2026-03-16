@@ -90,12 +90,17 @@ class RedditCollector(BaseCollector):
             "num_comments": submission.num_comments,
         }
 
-    def _sync_collect(self) -> list[dict[str, Any]]:
+    def _sync_collect(self, since_ts: float | None = None) -> list[dict[str, Any]]:
         """
         同步采集逻辑（在线程池中执行）。
 
+        Args:
+            since_ts: Unix 时间戳（秒），只返回 created_utc >= since_ts 的帖子。
+                      为 None 时不做时间过滤。
+
         策略：
           - 对每个目标 Subreddit 搜索关键词
+          - time_filter 根据 since 自动选择（今日→day，否则→week）
           - 合并结果并去重
 
         TODO: 支持搜索帖子内的评论文本
@@ -105,55 +110,69 @@ class RedditCollector(BaseCollector):
         results: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
 
-        query = " OR ".join(settings.reddit_keywords)
+        query       = " OR ".join(settings.reddit_keywords)
+        time_filter = "day" if since_ts else "week"   # 今日任务用 day，减少 API 用量
 
         for sub_name in settings.reddit_subreddits:
             try:
                 subreddit = reddit.subreddit(sub_name)
-                # 搜索最近帖子，按时间倒序
-                # TODO: 调整 time_filter 和 limit 参数
                 for submission in subreddit.search(
                     query,
                     sort="new",
-                    time_filter="week",
+                    time_filter=time_filter,
                     limit=50,
                 ):
                     if submission.id in seen_ids:
                         continue
                     seen_ids.add(submission.id)
 
-                    # 关键词二次过滤（搜索结果可能包含无关内容）
+                    # ① 时间窗口过滤
+                    if since_ts and submission.created_utc < since_ts:
+                        continue
+
+                    # ② 关键词二次过滤
                     full_text = f"{submission.title} {submission.selftext or ''}"
                     if not self._is_relevant(full_text):
                         continue
 
-                    parsed = self._parse_submission(submission)
-                    results.append(parsed)
+                    results.append(self._parse_submission(submission))
 
             except Exception as e:
                 self.logger.warning("搜索 r/%s 失败: %s", sub_name, e)
 
         return results
 
-    async def collect(self) -> list[dict[str, Any]]:
+    async def collect(self, since: datetime | None = None) -> list[dict[str, Any]]:
         """
         执行一次 Reddit 采集（异步包装同步逻辑）。
 
+        Args:
+            since: 只返回该时间点之后发布的帖子。
+                   定时任务传入当天 00:00 HKT，仅采集今日评论。
+
         增量逻辑：
-          1. 读取 Redis 中记录的 last_captured_at（ISO 时间戳）
-          2. 过滤掉 captured_at <= last 的已采集帖子
-          3. 保存最新帖子时间戳作为游标
+          1. 以 since（今日起始）作为主过滤条件
+          2. 同时用 Redis last_id（ISO 时间戳）去重，避免同一帖子被重复分析
+          3. 保存最新帖子时间戳作为下次游标
 
         Returns:
-            新增帖子列表。
+            今日新帖子列表。
         """
-        last_id = await self.get_last_id()  # 这里存储的是 ISO 时间戳字符串
-        self.logger.info("Reddit 采集开始，last_captured_at=%s", last_id)
+        last_id = await self.get_last_id()   # ISO 时间戳字符串
+        self.logger.info(
+            "Reddit 采集开始，since=%s，last_captured_at=%s",
+            since.isoformat() if since else "不限",
+            last_id,
+        )
 
-        # 在线程池中运行同步 PRAW 代码
+        # 计算 since 的 Unix 时间戳（PRAW 用 created_utc 比较）
+        since_ts: float | None = since.timestamp() if since else None
+
         loop = asyncio.get_event_loop()
         try:
-            all_posts = await loop.run_in_executor(None, self._sync_collect)
+            all_posts = await loop.run_in_executor(
+                None, partial(self._sync_collect, since_ts)
+            )
         except CollectorError:
             raise
         except Exception as e:
@@ -162,16 +181,15 @@ class RedditCollector(BaseCollector):
         if not all_posts:
             return []
 
-        # 增量过滤
+        # 去重：跳过已记录游标之前的帖子
         new_posts = [
             p for p in all_posts
             if last_id is None or p["captured_at"] > last_id
         ]
 
         if new_posts:
-            # 按时间升序排序，取最新的时间戳为游标
             new_posts.sort(key=lambda p: p["captured_at"])
             await self.save_last_id(new_posts[-1]["captured_at"])
 
-        self.logger.info("Reddit 采集完成，新帖子 %d 条", len(new_posts))
+        self.logger.info("Reddit 采集完成，今日新帖子 %d 条", len(new_posts))
         return new_posts

@@ -2,8 +2,8 @@
 src/collectors/base.py — 数据采集器抽象基类
 
 所有采集器均继承 BaseCollector，实现统一的接口：
-  - collect()        执行一次采集
-  - get_last_id()    读取上次采集游标（用于增量采集）
+  - collect(since)   执行一次采集，只返回 since 之后的数据
+  - get_last_id()    读取上次采集游标（用于增量去重）
   - save_last_id()   保存本次采集游标
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -89,9 +90,14 @@ class BaseCollector(ABC):
     # ── 核心采集接口 ─────────────────────────────────────────────────────────
 
     @abstractmethod
-    async def collect(self) -> list[dict[str, Any]]:
+    async def collect(self, since: datetime | None = None) -> list[dict[str, Any]]:
         """
         执行一次数据采集，返回原始数据列表。
+
+        Args:
+            since: 只返回该时间点之后发布的数据。
+                   为 None 时不做时间过滤（历史全量采集）。
+                   定时任务通常传入当天 00:00 HKT，仅分析当天舆情。
 
         每条记录是一个字典，至少包含以下字段：
           - platform (str)      数据来源平台
@@ -107,17 +113,22 @@ class BaseCollector(ABC):
         """
         ...
 
-    async def run_once(self) -> list[dict[str, Any]]:
+    async def run_once(self, since: datetime | None = None) -> list[dict[str, Any]]:
         """
         安全执行一次采集，捕获并记录异常。
+
+        Args:
+            since: 透传给 collect()，只采集该时间点之后的数据。
 
         Returns:
             同 collect()，出错时返回空列表。
         """
         try:
-            results = await self.collect()
+            results = await self.collect(since=since)
             self.logger.info(
-                "[%s] 采集完成，获得 %d 条记录", self.platform, len(results)
+                "[%s] 采集完成，获得 %d 条记录（since=%s）",
+                self.platform, len(results),
+                since.isoformat() if since else "全量",
             )
             return results
         except CollectorError as e:
@@ -126,6 +137,9 @@ class BaseCollector(ABC):
         except Exception as e:
             self.logger.exception("[%s] 未知错误: %s", self.platform, e)
             return []
+
+    # 别名，兼容调用方使用 safe_collect
+    safe_collect = run_once
 
     async def close(self) -> None:
         """释放资源（Redis 连接等）。"""

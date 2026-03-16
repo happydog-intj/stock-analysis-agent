@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -31,15 +32,29 @@ PLATFORM_WEIGHTS = {
 TICKER = "1860.HK"
 
 
+def _today_start() -> datetime:
+    """返回今天 00:00:00 HKT（带时区）。定时任务用此作为评论采集窗口起点。"""
+    HKT = ZoneInfo("Asia/Hong_Kong")
+    return datetime.combine(date.today(), time.min, tzinfo=HKT)
+
+
 async def _build_report_context(period: str) -> ReportContext:
-    """采集所有数据，构建报告上下文。"""
+    """采集当日数据，构建报告上下文。
+
+    评论采集只取今天 00:00 HKT 之后发布的内容，避免重复分析历史数据。
+    行情数据（Yahoo Finance）和公告（HKEX）不受此限制，仍采集最新状态。
+    """
     analyzer     = SentimentAnalyzer()
     yf_collector = YahooFinanceCollector()
     hkex         = HKEXCollector()
 
-    # 并发采集
-    xueqiu_task  = XueqiuCollector(ticker="01860").safe_collect()
-    reddit_task  = RedditCollector(ticker=TICKER).safe_collect()
+    # 今日 00:00 HKT — 所有评论采集的时间窗口起点
+    today_start = _today_start()
+    logger.info("报告周期=%s，评论时间窗口 since=%s", period, today_start.isoformat())
+
+    # 并发采集（评论类传入 since=today_start，行情/公告不需要）
+    xueqiu_task  = XueqiuCollector().run_once(since=today_start)
+    reddit_task  = RedditCollector().run_once(since=today_start)
     yf_task      = yf_collector.get_daily_snapshots()
     hkex_task    = hkex.poll()
 
@@ -60,8 +75,12 @@ async def _build_report_context(period: str) -> ReportContext:
 
     for platform, comments in [("xueqiu", xueqiu_comments), ("reddit", reddit_comments)]:
         if not comments:
+            logger.info("[%s] 今日无新评论，跳过情绪分析", platform)
             continue
-        texts   = [c.content for c in comments]
+        # comments 是 list[dict]，取 "content" 字段
+        texts   = [c["content"] for c in comments if c.get("content")]
+        if not texts:
+            continue
         results = await analyzer.analyze_batch(texts, ticker=TICKER, platform=platform)
         agg     = analyzer.aggregate(results, PLATFORM_WEIGHTS.get(platform, 0.1))
         score   = agg["avg_score"]
@@ -95,16 +114,21 @@ async def _build_report_context(period: str) -> ReportContext:
         if ann.priority == AnnouncementPriority.HIGH:
             risk_signals.append(f"高优先级公告：{ann.title}")
 
-    # 热点话题（合并所有平台）
+    # 热点话题：复用上方已分析过的 results，无需重复调用 LLM
+    # 合并所有平台当日评论文本再做一次聚合分析
     from src.analysis.sentiment import SentimentResult
-    all_results: list[SentimentResult] = []
-    for platform, comments in [("xueqiu", xueqiu_comments), ("reddit", reddit_comments)]:
-        if comments:
-            texts   = [c.content for c in comments]
-            results = await analyzer.analyze_batch(texts, ticker=TICKER, platform=platform)
-            all_results.extend(results)
-    agg_all    = analyzer.aggregate(all_results)
-    top_topics = agg_all.get("top_topics", [])
+    all_today_texts: list[str] = []
+    for comments in [xueqiu_comments, reddit_comments]:
+        all_today_texts.extend(c["content"] for c in comments if c.get("content"))
+
+    if all_today_texts:
+        all_results: list[SentimentResult] = await analyzer.analyze_batch(
+            all_today_texts, ticker=TICKER, platform="all"
+        )
+        agg_all    = analyzer.aggregate(all_results)
+        top_topics = agg_all.get("top_topics", [])
+    else:
+        top_topics = []
 
     return ReportContext(
         ticker=TICKER,

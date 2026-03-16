@@ -130,21 +130,30 @@ class XueqiuCollector(BaseCollector):
             self.logger.warning("解析帖子失败: %s", e)
             return None
 
-    async def collect(self) -> list[dict[str, Any]]:
+    async def collect(self, since: datetime | None = None) -> list[dict[str, Any]]:
         """
         执行一次雪球评论采集。
 
+        Args:
+            since: 只返回该时间点之后发布的帖子。
+                   定时任务传入当天 00:00 HKT，仅采集今日评论。
+
         增量逻辑：
-          1. 读取 Redis 中记录的 last_id
+          1. 读取 Redis 中记录的 last_id（用于去重，防止同一帖子被重复分析）
           2. 采集最新帖子列表
-          3. 过滤掉 id <= last_id 的已采集帖子
-          4. 保存最新帖子 id 为新游标
+          3. 过滤掉 id <= last_id 的已采集帖子（去重）
+          4. 若指定 since，额外过滤发布时间早于 since 的帖子
+          5. 保存最新帖子 id 为新游标
 
         Returns:
-            新增帖子列表（统一格式）。
+            符合条件的帖子列表（统一格式）。
         """
         last_id = await self.get_last_id()
-        self.logger.info("雪球采集开始，last_id=%s", last_id)
+        self.logger.info(
+            "雪球采集开始，last_id=%s，since=%s",
+            last_id,
+            since.isoformat() if since else "不限",
+        )
 
         context = await self._get_context()
         page = await context.new_page()
@@ -165,21 +174,42 @@ class XueqiuCollector(BaseCollector):
         for raw in raw_posts:
             post_id = str(raw.get("id", ""))
 
-            # 增量过滤
+            # ① 增量去重：跳过已采集帖子
             if last_id and post_id <= last_id:
                 continue
 
             parsed = await self._parse_post(raw)
-            if parsed:
-                results.append(parsed)
-                # 记录最新 ID（假设帖子按时间倒序排列）
-                if new_last_id is None:
-                    new_last_id = post_id
+            if not parsed:
+                continue
+
+            # ② 日期窗口过滤：只保留 since 之后发布的帖子
+            if since:
+                try:
+                    post_time = datetime.fromisoformat(parsed["captured_at"])
+                    # 统一为 aware datetime 再比较
+                    if post_time.tzinfo is None:
+                        post_time = post_time.replace(tzinfo=timezone.utc)
+                    since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+                    if post_time < since_aware:
+                        # 帖子按时间倒序，一旦遇到早于 since 的可以提前终止
+                        self.logger.debug("帖子 %s 早于 since，停止遍历", post_id)
+                        break
+                except (KeyError, ValueError) as e:
+                    self.logger.warning("解析帖子时间失败，跳过: %s", e)
+                    continue
+
+            results.append(parsed)
+            # 记录最新 ID（假设帖子按时间倒序排列）
+            if new_last_id is None:
+                new_last_id = post_id
 
         if new_last_id:
             await self.save_last_id(new_last_id)
 
-        self.logger.info("雪球采集完成，新帖子 %d 条", len(results))
+        self.logger.info(
+            "雪球采集完成，今日新帖子 %d 条",
+            len(results),
+        )
         return results
 
     async def close(self) -> None:
