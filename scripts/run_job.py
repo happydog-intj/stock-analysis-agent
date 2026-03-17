@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import settings
+from src.db.database import init_db
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -39,6 +40,7 @@ async def main(period: str) -> None:
     module = importlib.import_module(module_path)
     job_fn = getattr(module, func_name)
 
+    await init_db()
     logger.info("▶ 开始执行 [%s] 报告任务...", period)
     await job_fn()
     logger.info("✅ [%s] 报告任务完成", period)

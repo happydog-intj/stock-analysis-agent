@@ -84,6 +84,19 @@ class BaseCollector(ABC):
     # 别名
     safe_collect = run_once
 
+    async def get_last_id(self) -> str | None:
+        """
+        获取上次采集的游标（ID 或时间戳字符串）。
+        子类可覆盖以从数据库或文件读取；默认返回 None（全量采集）。
+        """
+        return None
+
+    async def save_last_id(self, last_id: str) -> None:
+        """
+        保存采集游标。子类可覆盖以持久化到数据库或文件；默认 no-op。
+        """
+        pass
+
     async def close(self) -> None:
         """释放资源（子类按需覆盖）。"""
         pass

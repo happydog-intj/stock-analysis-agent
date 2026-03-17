@@ -25,7 +25,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON as JSONB  # JSONB is PostgreSQL-only; use JSON for SQLite compat
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
