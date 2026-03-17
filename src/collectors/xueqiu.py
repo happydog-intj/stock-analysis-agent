@@ -81,16 +81,24 @@ class XueqiuCollector(BaseCollector):
         self._symbol = _ticker_to_xueqiu_symbol(settings.primary_ticker)
 
     def _setup_token(self) -> bool:
-        """从 XUEQIU_COOKIES 提取并设置 pysnowball token，返回是否成功。"""
-        raw = settings.xueqiu_cookies.strip()
+        """
+        从 XUEQIU_COOKIES 环境变量读取 xq_a_token 并设置 pysnowball。
+        变量值直接就是 xq_a_token 的值（repository variable 格式）。
+        """
+        import os
+        # 优先读 pydantic settings，fallback 到直接读环境变量
+        raw = settings.xueqiu_cookies.strip() or os.environ.get("XUEQIU_COOKIES", "").strip()
         if not raw:
             self.logger.warning("XUEQIU_COOKIES 未配置，雪球采集将跳过")
             return False
 
+        # 支持两种格式：
+        #   1. 纯 token 值（repository variable 推荐格式）
+        #   2. 完整 cookie 字符串（含 xq_a_token=xxx）
         token = _extract_token(raw)
         self._token = token
         pysnowball.set_token(token)
-        self.logger.info("雪球 token 已配置（前8位: %s...）", token[:8])
+        self.logger.info("雪球 xq_a_token 已配置（长度: %d）", len(token))
         return True
 
     def _fetch_timeline(self, count: int = 20) -> list[dict[str, Any]]:

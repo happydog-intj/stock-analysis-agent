@@ -80,7 +80,7 @@ jobs:
           REDDIT_CLIENT_SECRET:  ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USERNAME:       ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD:       ${{ secrets.REDDIT_PASSWORD }}
-          XUEQIU_COOKIES:        ${{ secrets.XUEQIU_COOKIES }}
+          XUEQIU_COOKIES:        ${{ vars.XUEQIU_COOKIES }}
           LOG_LEVEL:             INFO
 
       # ── 6. 创建 GitHub Issue 报告 ────────────────────────────
