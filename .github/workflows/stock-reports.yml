@@ -67,7 +67,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 取最近 1 条 xueqiu-data issue 的 body，提取 JSON 代码块
           BODY=$(gh issue list \
             --repo ${{ github.repository }} \
             --label "xueqiu-data" \
@@ -75,22 +74,18 @@ jobs:
             --json body \
             --jq '.[0].body // ""')
 
-          if [ -n "$BODY" ]; then
-            # 提取 ```json ... ``` 代码块中的内容
-            echo "$BODY" | python3 -c "
-import sys, re, json
-body = sys.stdin.read()
-m = re.search(r'\`\`\`json\s*(.*?)\s*\`\`\`', body, re.DOTALL)
-if m:
-    data = json.loads(m.group(1))
-    with open('xueqiu_data.json', 'w') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f'[OK] 雪球数据已载入: {len(data.get(\"posts\", []))} 条帖子')
-else:
-    print('[WARN] 未找到 JSON 数据块')
-"
-          else
+          if [ -z "$BODY" ]; then
             echo "[INFO] 无可用的雪球 Issue 数据，跳过"
+            exit 0
+          fi
+
+          # 用 awk 提取 ```json ... ``` 代码块（避免多行 Python 破坏 YAML 缩进）
+          echo "$BODY" | awk '/^```json$/{f=1;next}/^```$/{f=0}f' > /tmp/xq_raw.json
+
+          if [ -s /tmp/xq_raw.json ]; then
+            python3 -c "import json; d=json.load(open('/tmp/xq_raw.json')); json.dump(d,open('xueqiu_data.json','w'),ensure_ascii=False); print('[OK] 雪球数据载入:', len(d.get('posts',[])), '条帖子')"
+          else
+            echo "[WARN] Issue 中未找到 JSON 数据块"
           fi
 
       # ── 5. 执行报告任务 ──────────────────────────────────────
