@@ -76,7 +76,42 @@ class XueqiuCollector(BaseCollector):
                 locale="zh-CN",
                 timezone_id="Asia/Shanghai",
             )
-            # TODO: 从环境变量 XUEQIU_COOKIES 加载 Cookie
+            # 注入 XUEQIU_COOKIES（支持 JSON 列表或 key=value; 字符串两种格式）
+            raw_cookies = settings.xueqiu_cookies.strip()
+            if raw_cookies:
+                try:
+                    cookie_list = json.loads(raw_cookies)
+                    if isinstance(cookie_list, list):
+                        # Playwright cookie 格式：补充必要字段
+                        pw_cookies = [
+                            {
+                                "name": c.get("name", c.get("key", "")),
+                                "value": c.get("value", ""),
+                                "domain": c.get("domain", ".xueqiu.com"),
+                                "path": c.get("path", "/"),
+                            }
+                            for c in cookie_list
+                            if c.get("name") or c.get("key")
+                        ]
+                    else:
+                        pw_cookies = []
+                except json.JSONDecodeError:
+                    # 纯字符串格式：key=value; key2=value2
+                    pw_cookies = [
+                        {
+                            "name": part.split("=", 1)[0].strip(),
+                            "value": part.split("=", 1)[1].strip() if "=" in part else "",
+                            "domain": ".xueqiu.com",
+                            "path": "/",
+                        }
+                        for part in raw_cookies.split(";")
+                        if "=" in part.strip()
+                    ]
+                if pw_cookies:
+                    await self._context.add_cookies(pw_cookies)
+                    self.logger.info("已注入 %d 条雪球 Cookie", len(pw_cookies))
+                else:
+                    self.logger.warning("XUEQIU_COOKIES 解析结果为空，将以未登录状态访问")
         return self._context
 
     async def _fetch_posts_via_api(self, page: Page) -> list[dict[str, Any]]:
