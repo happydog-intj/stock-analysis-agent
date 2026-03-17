@@ -99,7 +99,7 @@ class SentimentRecord(Base):
 
     __tablename__ = "sentiment_records"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     platform: Mapped[str] = mapped_column(
         Enum(Platform, name="platform_enum"), nullable=False, index=True
@@ -146,7 +146,7 @@ class DailySnapshot(Base):
 
     __tablename__ = "daily_snapshots"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     snapshot_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
@@ -190,7 +190,7 @@ class Announcement(Base):
 
     __tablename__ = "announcements"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -235,7 +235,7 @@ class CompetitorSnapshot(Base):
 
     __tablename__ = "competitor_snapshots"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
