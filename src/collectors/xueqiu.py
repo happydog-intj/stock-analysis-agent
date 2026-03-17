@@ -1,223 +1,207 @@
 """
-src/collectors/xueqiu.py — 雪球评论采集器
+src/collectors/xueqiu.py — 雪球数据采集器（基于 pysnowball）
 
-使用 Playwright 异步爬取 https://xueqiu.com/S/01860 的评论帖子，
-支持增量采集（基于最新帖子 ID）。
+使用 pysnowball 库通过 xq_a_token 认证访问雪球 API，
+采集指定股票的社交帖子、实时行情及财务摘要。
 
-依赖：
-    playwright install chromium
+配置：XUEQIU_COOKIES 环境变量，支持两种格式：
+  1. 纯 token 字符串（仅 xq_a_token 的值）
+  2. 完整 cookie 字符串：xq_a_token=xxx; xq_r_token=yyy; ...
 
-注意：雪球需要登录 Cookie 才能访问部分内容，
-可通过 XUEQIU_COOKIES 环境变量注入（JSON 格式）。
+雪球港股代码格式：HK + 五位代码（如 1860.HK → HK01860）
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
-from datetime import UTC, datetime, timezone
+import re
+from datetime import UTC, datetime
 from typing import Any
 
-from playwright.async_api import (
-    Browser,
-    BrowserContext,
-    Page,
-    async_playwright,
-)
+import httpx
+import pysnowball
 
 from config.settings import settings
 from src.collectors.base import BaseCollector, CollectorError
 
 logger = logging.getLogger(__name__)
 
-# 雪球汇量科技股票讨论页
-XUEQIU_URL = "https://xueqiu.com/S/01860"
+# 雪球社交 timeline API
+TIMELINE_URL = "https://xueqiu.com/v4/statuses/public_timeline_by_symbol.json"
+XUEQIU_HOST = "xueqiu.com"
 
-# 雪球 API：获取股票帖子列表（非官方，可能随版本变化）
-XUEQIU_API_POSTS = (
-    "https://xueqiu.com/query/v1/symbol/search/status.json?count=20&symbol=01860&type=11"
-)
+
+def _ticker_to_xueqiu_symbol(ticker: str) -> str:
+    """
+    将 Yahoo Finance 格式代码转为雪球格式。
+    1860.HK → HK01860
+    APP / U  → 直接大写（美股无需前缀）
+    """
+    if ticker.endswith(".HK"):
+        code = ticker.replace(".HK", "").zfill(5)
+        return f"HK{code}"
+    return ticker.upper()
+
+
+def _extract_token(raw: str) -> str:
+    """
+    从 cookie 字符串中提取 xq_a_token 的值。
+    支持：
+      - 纯 token 值（不含 =）
+      - xq_a_token=xxx; ...
+    """
+    raw = raw.strip()
+    if "=" not in raw:
+        return raw  # 直接就是 token 值
+
+    match = re.search(r"xq_a_token=([^;]+)", raw)
+    if match:
+        return match.group(1).strip()
+
+    # 找不到 xq_a_token，取第一个 key=value 的 value
+    first = raw.split(";")[0]
+    return first.split("=", 1)[1].strip() if "=" in first else raw
 
 
 class XueqiuCollector(BaseCollector):
     """
-    雪球评论采集器（Playwright 异步爬虫）。
+    雪球采集器：社交帖子 + 实时行情。
 
-    增量策略：记录最新帖子 ID，下次采集时跳过已处理记录。
+    认证方式：pysnowball.set_token(xq_a_token)
+    社交帖子：通过 httpx 调用雪球 timeline API
+    行情数据：通过 pysnowball.quote_detail / realtime
     """
 
     platform = "xueqiu"
 
     def __init__(self) -> None:
         super().__init__()
-        self._browser: Browser | None = None
-        self._context: BrowserContext | None = None
+        self._token: str | None = None
+        self._symbol = _ticker_to_xueqiu_symbol(settings.primary_ticker)
 
-    async def _get_context(self) -> BrowserContext:
-        """
-        获取（或创建）Playwright 浏览器上下文。
+    def _setup_token(self) -> bool:
+        """从 XUEQIU_COOKIES 提取并设置 pysnowball token，返回是否成功。"""
+        raw = settings.xueqiu_cookies.strip()
+        if not raw:
+            self.logger.warning("XUEQIU_COOKIES 未配置，雪球采集将跳过")
+            return False
 
-        TODO: 支持注入 Cookie，解锁登录后内容
-        TODO: 添加 User-Agent 伪装与 Stealth 插件
-        """
-        if self._context is None:
-            # TODO: 考虑使用持久化上下文保存 Session
-            playwright = await async_playwright().start()
-            self._browser = await playwright.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            self._context = await self._browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                locale="zh-CN",
-                timezone_id="Asia/Shanghai",
-            )
-            # 注入 XUEQIU_COOKIES（支持 JSON 列表或 key=value; 字符串两种格式）
-            raw_cookies = settings.xueqiu_cookies.strip()
-            if raw_cookies:
-                try:
-                    cookie_list = json.loads(raw_cookies)
-                    if isinstance(cookie_list, list):
-                        # Playwright cookie 格式：补充必要字段
-                        pw_cookies = [
-                            {
-                                "name": c.get("name", c.get("key", "")),
-                                "value": c.get("value", ""),
-                                "domain": c.get("domain", ".xueqiu.com"),
-                                "path": c.get("path", "/"),
-                            }
-                            for c in cookie_list
-                            if c.get("name") or c.get("key")
-                        ]
-                    else:
-                        pw_cookies = []
-                except json.JSONDecodeError:
-                    # 纯字符串格式：key=value; key2=value2
-                    pw_cookies = [
-                        {
-                            "name": part.split("=", 1)[0].strip(),
-                            "value": part.split("=", 1)[1].strip() if "=" in part else "",
-                            "domain": ".xueqiu.com",
-                            "path": "/",
-                        }
-                        for part in raw_cookies.split(";")
-                        if "=" in part.strip()
-                    ]
-                if pw_cookies:
-                    await self._context.add_cookies(pw_cookies)
-                    self.logger.info("已注入 %d 条雪球 Cookie", len(pw_cookies))
-                else:
-                    self.logger.warning("XUEQIU_COOKIES 解析结果为空，将以未登录状态访问")
-        return self._context
+        token = _extract_token(raw)
+        self._token = token
+        pysnowball.set_token(token)
+        self.logger.info("雪球 token 已配置（前8位: %s...）", token[:8])
+        return True
 
-    async def _fetch_posts_via_api(self, page: Page) -> list[dict[str, Any]]:
-        """
-        通过雪球内部 API 接口获取帖子列表。
+    def _fetch_timeline(self, count: int = 20) -> list[dict[str, Any]]:
+        """同步获取股票 timeline 帖子（requests，与 pysnowball 保持一致）。"""
+        import requests
 
-        TODO: 处理分页，支持 max_id 翻页参数
-        TODO: 处理 429 限速，添加退避重试
-        """
+        headers = {
+            "Host": XUEQIU_HOST,
+            "Cookie": f"xq_a_token={self._token}",
+            "User-Agent": "Xueqiu iPhone 14.15.1",
+            "Accept": "application/json",
+            "Accept-Language": "zh-Hans-CN;q=1",
+            "Accept-Encoding": "gzip, deflate",
+            "Referer": f"https://xueqiu.com/S/{self._symbol}",
+        }
+        resp = requests.get(
+            TIMELINE_URL,
+            params={"count": count, "symbol": self._symbol},
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise CollectorError(f"雪球 timeline API 返回 {resp.status_code}")
+
+        data = resp.json()
+        return data.get("statuses", [])
+
+    def _fetch_quote(self) -> dict[str, Any]:
+        """同步获取实时行情（pysnowball）。"""
         try:
-            response = await page.goto(XUEQIU_API_POSTS, wait_until="networkidle")
-            if response is None or response.status != 200:
-                raise CollectorError(f"雪球 API 请求失败，状态码: {response and response.status}")
-            text = await page.inner_text("body")
-            data = json.loads(text)
-            return data.get("list", [])
-        except json.JSONDecodeError as e:
-            raise CollectorError(f"解析雪球 API 响应失败: {e}") from e
-
-    async def _parse_post(self, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """
-        解析单条雪球帖子原始数据为统一格式。
-
-        TODO: 提取更多字段（转发数、点赞数、回复数）
-        TODO: 过滤广告帖子
-        """
-        try:
-            post_id = str(raw.get("id", ""))
-            content = raw.get("text", "") or raw.get("description", "")
-            # 去除 HTML 标签（简单处理）
-            # TODO: 使用 BeautifulSoup 或正则更精确地清理 HTML
-            import re
-
-            content = re.sub(r"<[^>]+>", "", content).strip()
-
-            created_ms = raw.get("created_at", 0)
-            created_at = datetime.fromtimestamp(created_ms / 1000, tz=UTC).isoformat()
-
-            return {
-                "platform": self.platform,
-                "ticker": settings.primary_ticker,
-                "external_id": post_id,
-                "content": content[:2000],  # 截断超长内容
-                "author": raw.get("user", {}).get("screen_name", ""),
-                "captured_at": created_at,
-                "raw": raw,  # 保留原始数据供调试
-            }
+            result = pysnowball.quote_detail(self._symbol)
+            quote = result.get("data", {}).get("quote", {})
+            return quote
         except Exception as e:
-            self.logger.warning("解析帖子失败: %s", e)
+            self.logger.warning("行情获取失败: %s", e)
+            return {}
+
+    def _parse_post(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        """将雪球原始帖子转为统一格式。"""
+        text = raw.get("text") or raw.get("description") or ""
+        # 去除 HTML 标签
+        text = re.sub(r"<[^>]+>", "", text).strip()
+        if not text:
             return None
 
+        user = raw.get("user") or {}
+        created_ms = raw.get("created_at")
+        captured_at = (
+            datetime.fromtimestamp(created_ms / 1000, tz=UTC).isoformat()
+            if created_ms
+            else datetime.now(UTC).isoformat()
+        )
+
+        return {
+            "platform": self.platform,
+            "ticker": settings.primary_ticker,
+            "external_id": str(raw.get("id", "")),
+            "content": text[:1000],
+            "author": user.get("screen_name") or user.get("id"),
+            "captured_at": captured_at,
+            "score": None,
+            "sentiment": None,
+            "topics": [],
+            "confidence": None,
+        }
+
     async def collect(self, since: datetime | None = None) -> list[dict[str, Any]]:
-        """
-        执行一次雪球评论采集。
-
-        Args:
-            since: 只返回该时间点之后发布的帖子。
-                   定时任务传入当天 00:00 HKT，仅采集今日评论。
-                   帖子按时间倒序排列，遇到早于 since 的即提前终止。
-        """
-        self.logger.info("雪球采集开始，since=%s", since.isoformat() if since else "全量")
-
-        context = await self._get_context()
-        page = await context.new_page()
-
-        try:
-            raw_posts = await self._fetch_posts_via_api(page)
-        finally:
-            await page.close()
-
-        if not raw_posts:
-            self.logger.info("雪球：未获取到帖子")
+        """采集雪球帖子 + 行情（通过 pysnowball 认证）。"""
+        if not self._setup_token():
             return []
 
+        loop = asyncio.get_event_loop()
+
+        # 1. 采集社交帖子
+        try:
+            raw_posts = await loop.run_in_executor(None, self._fetch_timeline)
+        except CollectorError as e:
+            raise
+        except Exception as e:
+            raise CollectorError(f"雪球帖子采集失败: {e}") from e
+
         results: list[dict[str, Any]] = []
-        since_aware = since.replace(tzinfo=UTC) if since and since.tzinfo is None else since
-
         for raw in raw_posts:
-            parsed = await self._parse_post(raw)
-            if not parsed:
+            parsed = self._parse_post(raw)
+            if parsed is None:
                 continue
-
-            # 时间窗口过滤：帖子倒序，遇到早于 since 的直接终止
-            if since_aware:
+            # 增量过滤
+            if since:
                 try:
                     post_time = datetime.fromisoformat(parsed["captured_at"])
-                    if post_time.tzinfo is None:
-                        post_time = post_time.replace(tzinfo=UTC)
-                    if post_time < since_aware:
-                        self.logger.debug("帖子早于 since，终止遍历")
-                        break
-                except (KeyError, ValueError) as e:
-                    self.logger.warning("解析帖子时间失败，跳过: %s", e)
-                    continue
-
+                    if post_time < since:
+                        continue
+                except Exception:
+                    pass
             results.append(parsed)
 
-        self.logger.info("雪球采集完成，%d 条", len(results))
-        return results
+        self.logger.info(
+            "雪球帖子采集完成：共 %d 条（symbol=%s，since=%s）",
+            len(results),
+            self._symbol,
+            since.isoformat() if since else "全量",
+        )
 
-    async def close(self) -> None:
-        """关闭浏览器并释放 Redis 连接。"""
-        if self._context:
-            await self._context.close()
-            self._context = None
-        if self._browser:
-            await self._browser.close()
-            self._browser = None
-        await super().close()
+        # 2. 采集行情（附加到日志，不算入 sentiment records）
+        quote = await loop.run_in_executor(None, self._fetch_quote)
+        if quote:
+            self.logger.info(
+                "雪球行情 %s: 现价=%s 涨跌幅=%s%%",
+                self._symbol,
+                quote.get("current"),
+                quote.get("percent"),
+            )
+
+        return results

@@ -45,11 +45,7 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 3. Playwright 浏览器（用于雪球爬虫）──────────────────
-      - name: 🌐 Install Playwright browsers
-        run: playwright install chromium --with-deps
-
-      # ── 4. 判断当前应执行哪个报告 ─────────────────────────────
+      # ── 3. 判断当前应执行哪个报告 ─────────────────────────────
       - name: 🕐 Determine report period
         id: period
         run: |
@@ -66,7 +62,7 @@ jobs:
             echo "PERIOD=$PERIOD" >> $GITHUB_OUTPUT
           fi
 
-      # ── 5. 执行报告任务 ──────────────────────────────────────
+      # ── 4. 执行报告任务 ──────────────────────────────────────
       - name: 📊 Run ${{ steps.period.outputs.PERIOD }} report
         run: python scripts/run_job.py ${{ steps.period.outputs.PERIOD }}
         env:
