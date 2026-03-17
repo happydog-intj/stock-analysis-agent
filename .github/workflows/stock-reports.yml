@@ -24,6 +24,9 @@ jobs:
     name: Generate & Push Report
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      issues: write
+      contents: read
 
     steps:
       # ── 1. 检出代码 ──────────────────────────────────────────
