@@ -34,6 +34,7 @@ from src.collectors.reddit import RedditCollector
 from src.collectors.xueqiu import XueqiuCollector
 from src.collectors.yahoo_finance import YahooFinanceCollector
 # DB layer removed — stateless design for GitHub Actions (in-memory SQLite had no persistence value)
+from src.reporters.markdown import render_report
 from src.reporters.feishu import FeishuReporter
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,12 @@ class Orchestrator:
             "announcements": announcements,
         }
         await self.reporter.send_report(report_data)
+
+        # 写 Markdown 报告文件（供 GitHub Issue 步骤读取）
+        md_path = "report_output.md"
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(render_report(report_data))
+        logger.info("Markdown 报告已写入 %s", md_path)
 
         elapsed = (datetime.now(UTC) - start_time).total_seconds()
         logger.info("%s 报告流程完成，耗时 %.1fs", period, elapsed)

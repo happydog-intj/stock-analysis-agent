@@ -84,7 +84,31 @@ jobs:
           XUEQIU_COOKIES:        ${{ secrets.XUEQIU_COOKIES }}
           LOG_LEVEL:             INFO
 
-      # ── 6. 上传日志（失败时保留） ─────────────────────────────
+      # ── 6. 创建 GitHub Issue 报告 ────────────────────────────
+      - name: 📝 Create GitHub Issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PERIOD="${{ steps.period.outputs.PERIOD }}"
+          DATE=$(TZ='Asia/Hong_Kong' date +"%Y-%m-%d")
+          case "$PERIOD" in
+            morning) LABEL="晨报 🌅" ;;
+            noon)    LABEL="午报 ☀️" ;;
+            close)   LABEL="收盘报 🌙" ;;
+            *)       LABEL="$PERIOD" ;;
+          esac
+          TITLE="📊 汇量科技 1860.HK ${LABEL} ${DATE}"
+          # 确保 report label 存在（首次可能不存在）
+          gh label create "report" --color "#0075ca" --description "自动生成的股票报告" \
+            --repo ${{ github.repository }} 2>/dev/null || true
+          gh issue create \
+            --title "$TITLE" \
+            --body-file report_output.md \
+            --label "report" \
+            --repo ${{ github.repository }}
+
+      # ── 7. 上传日志（失败时保留） ─────────────────────────────
       - name: 📁 Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
