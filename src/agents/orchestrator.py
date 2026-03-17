@@ -11,6 +11,18 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timezone
+
+
+def _parse_dt(val: str | datetime | None, default: datetime | None = None) -> datetime:
+    """将 ISO 字符串或 datetime 对象统一转换为 datetime；None 时返回 default 或 now()。"""
+    if val is None:
+        return default if default is not None else datetime.now(UTC)
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(str(val))
+    except ValueError:
+        return default if default is not None else datetime.now(UTC)
 from typing import Any
 
 from config.settings import settings
@@ -106,7 +118,7 @@ class Orchestrator:
                     sentiment=r.get("sentiment"),
                     topics=r.get("topics"),
                     confidence=r.get("confidence"),
-                    captured_at=r.get("captured_at", datetime.now(UTC)),
+                    captured_at=_parse_dt(r.get("captured_at")),
                 )
                 session.add(record)
         logger.info("保存 %d 条情绪记录", len(records))
@@ -162,7 +174,7 @@ class Orchestrator:
                     announcement_type=a.get("announcement_type", "general"),
                     priority=a.get("priority", 1),
                     url=a.get("url"),
-                    published_at=a.get("published_at", datetime.now(UTC)),
+                    published_at=_parse_dt(a.get("published_at")),
                 )
                 session.add(ann)
         logger.info("保存 %d 条公告", len(announcements))
