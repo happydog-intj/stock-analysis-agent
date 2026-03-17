@@ -67,24 +67,37 @@ class Orchestrator:
     async def collect_all(self) -> dict[str, list[dict[str, Any]]]:
         """
         并行执行所有采集器。
-
-        Returns:
-            各采集器的结果字典，key 为平台名。
-
-        TODO: 使用 asyncio.gather 并行化采集
-        TODO: 添加超时控制（每个采集器最多 60s）
+        雪球数据优先从 xueqiu_data.json（本机采集写入 GitHub Issue 后注入）读取。
         """
+        import json as _json
+        import pathlib
+
         results: dict[str, list[dict[str, Any]]] = {}
 
+        # ── 雪球：优先读本机采集写入的 JSON 文件 ──────────────────
+        xq_file = pathlib.Path("xueqiu_data.json")
+        if xq_file.exists():
+            try:
+                payload = _json.loads(xq_file.read_text(encoding="utf-8"))
+                posts = payload.get("posts", [])
+                logger.info("雪球数据已从 xueqiu_data.json 载入：%d 条帖子", len(posts))
+                results["xueqiu"] = posts
+            except Exception as e:
+                logger.warning("读取 xueqiu_data.json 失败: %s，回退到采集器", e)
+                logger.info("开始采集: xueqiu")
+                results["xueqiu"] = await self.xueqiu.run_once()
+        else:
+            logger.info("开始采集: xueqiu（无本地数据文件）")
+            results["xueqiu"] = await self.xueqiu.run_once()
+
+        # ── 其他采集器 ─────────────────────────────────────────────
         for collector, name in [
-            (self.xueqiu, "xueqiu"),
             (self.reddit, "reddit"),
             (self.hkex, "hkex"),
             (self.yahoo, "yahoo_finance"),
         ]:
             logger.info("开始采集: %s", name)
-            data = await collector.run_once()
-            results[name] = data
+            results[name] = await collector.run_once()
 
         return results
 

@@ -62,7 +62,38 @@ jobs:
             echo "PERIOD=$PERIOD" >> $GITHUB_OUTPUT
           fi
 
-      # ── 4. 执行报告任务 ──────────────────────────────────────
+      # ── 4. 拉取最新雪球数据（本机采集写入的 Issue）────────────
+      - name: 🐦 Fetch latest Xueqiu data from Issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 取最近 1 条 xueqiu-data issue 的 body，提取 JSON 代码块
+          BODY=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "xueqiu-data" \
+            --limit 1 \
+            --json body \
+            --jq '.[0].body // ""')
+
+          if [ -n "$BODY" ]; then
+            # 提取 ```json ... ``` 代码块中的内容
+            echo "$BODY" | python3 -c "
+import sys, re, json
+body = sys.stdin.read()
+m = re.search(r'\`\`\`json\s*(.*?)\s*\`\`\`', body, re.DOTALL)
+if m:
+    data = json.loads(m.group(1))
+    with open('xueqiu_data.json', 'w') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f'[OK] 雪球数据已载入: {len(data.get(\"posts\", []))} 条帖子')
+else:
+    print('[WARN] 未找到 JSON 数据块')
+"
+          else
+            echo "[INFO] 无可用的雪球 Issue 数据，跳过"
+          fi
+
+      # ── 5. 执行报告任务 ──────────────────────────────────────
       - name: 📊 Run ${{ steps.period.outputs.PERIOD }} report
         run: python scripts/run_job.py ${{ steps.period.outputs.PERIOD }}
         env:
