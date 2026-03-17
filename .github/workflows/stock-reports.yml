@@ -85,6 +85,7 @@ jobs:
 
       # ── 6. 创建 GitHub Issue 报告 ────────────────────────────
       - name: 📝 Create GitHub Issue
+        id: create_issue
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,14 +99,48 @@ jobs:
             *)       LABEL="$PERIOD" ;;
           esac
           TITLE="📊 汇量科技 1860.HK ${LABEL} ${DATE}"
-          # 确保 report label 存在（首次创建，已存在时忽略错误）
           gh label create "report" --color "#0075ca" --description "自动生成的股票报告" --repo ${{ github.repository }} 2>/dev/null || true
-          # 创建 Issue（带 label 失败则不带 label 重试）
-          if ! gh issue create --title "$TITLE" --body-file report_output.md --label "report" --repo ${{ github.repository }}; then
-            gh issue create --title "$TITLE" --body-file report_output.md --repo ${{ github.repository }}
+          if ! ISSUE_URL=$(gh issue create --title "$TITLE" --body-file report_output.md --label "report" --repo ${{ github.repository }}); then
+            ISSUE_URL=$(gh issue create --title "$TITLE" --body-file report_output.md --repo ${{ github.repository }})
+          fi
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+          echo "$ISSUE_URL" > issue_url.txt
+
+      # ── 7. Telegram 通知 ─────────────────────────────────────
+      - name: 📬 Send Telegram notification
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          PERIOD="${{ steps.period.outputs.PERIOD }}"
+          DATE=$(TZ='Asia/Hong_Kong' date +"%Y-%m-%d")
+          ISSUE_URL=$(cat issue_url.txt 2>/dev/null || echo "")
+          case "$PERIOD" in
+            morning) PERIOD_LABEL="晨报 🌅" ;;
+            noon)    PERIOD_LABEL="午报 ☀️" ;;
+            close)   PERIOD_LABEL="收盘报 🌙" ;;
+            *)       PERIOD_LABEL="$PERIOD" ;;
+          esac
+
+          # 从 report_output.md 提取关键数字
+          PRICE=$(grep -oP '最新价 \| \K[0-9.]+' report_output.md | head -1 || echo "N/A")
+          CHANGE=$(grep -oP '涨跌幅 \| \K[^|]+' report_output.md | head -1 | tr -d ' ' || echo "N/A")
+
+          MESSAGE="📊 <b>汇量科技 1860.HK ${PERIOD_LABEL}</b>%0A"
+          MESSAGE="${MESSAGE}📅 ${DATE}%0A%0A"
+          MESSAGE="${MESSAGE}💹 现价: <b>${PRICE} HKD</b>%0A"
+          MESSAGE="${MESSAGE}📈 涨跌幅: ${CHANGE}%0A"
+          if [ -n "$ISSUE_URL" ]; then
+            MESSAGE="${MESSAGE}%0A🔗 <a href='${ISSUE_URL}'>查看完整报告</a>"
           fi
 
-      # ── 7. 上传日志（失败时保留） ─────────────────────────────
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=7585470903" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=HTML" \
+            -d "disable_web_page_preview=true"
+
+      # ── 8. 上传日志（失败时保留） ─────────────────────────────
       - name: 📁 Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
