@@ -129,7 +129,7 @@ class HKEXCollector(BaseCollector):
             },
         ]
 
-    async def collect(self) -> list[dict[str, Any]]:
+    async def collect(self, since: datetime | None = None) -> list[dict[str, Any]]:
         """
         执行一次港交所公告采集。
 

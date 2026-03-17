@@ -34,14 +34,16 @@ def get_engine() -> AsyncEngine:
     """返回（或创建）全局异步引擎。"""
     global _engine
     if _engine is None:
-        # TODO: 根据生产环境需求调整 pool_size / max_overflow / pool_recycle
-        _engine = create_async_engine(
-            settings.db_url,
-            pool_size=settings.db_pool_size,
-            max_overflow=settings.db_max_overflow,
-            pool_pre_ping=True,
-            echo=settings.log_level == "DEBUG",
-        )
+        # SQLite 不支持 pool_size / max_overflow，仅非 SQLite 时传入
+        is_sqlite = settings.db_url.startswith("sqlite")
+        engine_kwargs: dict = {
+            "pool_pre_ping": not is_sqlite,
+            "echo": settings.log_level == "DEBUG",
+        }
+        if not is_sqlite:
+            engine_kwargs["pool_size"] = settings.db_pool_size
+            engine_kwargs["max_overflow"] = settings.db_max_overflow
+        _engine = create_async_engine(settings.db_url, **engine_kwargs)
         logger.info("数据库引擎已创建: %s", settings.db_url.split("@")[-1])
     return _engine
 

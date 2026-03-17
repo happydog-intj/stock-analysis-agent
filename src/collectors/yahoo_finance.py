@@ -113,7 +113,7 @@ class YahooFinanceCollector(BaseCollector):
                 results.append(data)
         return results
 
-    async def collect(self) -> list[dict[str, Any]]:
+    async def collect(self, since: datetime | None = None) -> list[dict[str, Any]]:
         """
         执行一次行情数据采集（异步包装同步 yfinance）。
 
