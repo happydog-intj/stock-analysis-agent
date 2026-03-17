@@ -99,13 +99,18 @@ jobs:
             *)       LABEL="$PERIOD" ;;
           esac
           TITLE="📊 汇量科技 1860.HK ${LABEL} ${DATE}"
-          # 确保 report label 存在（首次可能不存在）
+          # 确保 report label 存在（首次创建，已存在时忽略错误）
           gh label create "report" --color "#0075ca" --description "自动生成的股票报告" \
             --repo ${{ github.repository }} 2>/dev/null || true
+          # 尝试带 label 创建，失败则不带 label 重试
           gh issue create \
             --title "$TITLE" \
             --body-file report_output.md \
             --label "report" \
+            --repo ${{ github.repository }} \
+          || gh issue create \
+            --title "$TITLE" \
+            --body-file report_output.md \
             --repo ${{ github.repository }}
 
       # ── 7. 上传日志（失败时保留） ─────────────────────────────
