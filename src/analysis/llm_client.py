@@ -131,11 +131,11 @@ class OpenAICompatClient(BaseLLMClient):
 
 
 def create_llm_client() -> BaseLLMClient:
-    """根据 settings.LLM_PROVIDER 创建对应的 LLM 客户端。"""
+    """根据 settings.llm_provider 创建对应的 LLM 客户端。"""
     from config.settings import settings
 
-    provider = settings.LLM_PROVIDER.lower()
-    model = settings.LLM_MODEL or DEFAULT_MODELS.get(provider, "")
+    provider = settings.llm_provider.lower()
+    model = settings.llm_model or DEFAULT_MODELS.get(provider, "")
 
     logger.info("LLM 提供商: %s | 模型: %s", provider, model)
 
