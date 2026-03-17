@@ -33,14 +33,7 @@ from src.collectors.hkex import HKEXCollector
 from src.collectors.reddit import RedditCollector
 from src.collectors.xueqiu import XueqiuCollector
 from src.collectors.yahoo_finance import YahooFinanceCollector
-from src.db.database import get_session
-from src.db.models import (
-    Announcement,
-    CompetitorSnapshot,
-    DailySnapshot,
-    ReportPeriod,
-    SentimentRecord,
-)
+# DB layer removed — stateless design for GitHub Actions (in-memory SQLite had no persistence value)
 from src.reporters.feishu import FeishuReporter
 
 logger = logging.getLogger(__name__)
@@ -98,85 +91,21 @@ class Orchestrator:
         self,
         records: list[dict[str, Any]],
     ) -> None:
-        """
-        将情绪分析结果写入 sentiment_records 表。
-
-        TODO: 使用 upsert（ON CONFLICT DO UPDATE）避免重复插入
-        """
-        if not records:
-            return
-
-        async with get_session() as session:
-            for r in records:
-                record = SentimentRecord(
-                    platform=r.get("platform", "other"),
-                    ticker=r.get("ticker", settings.primary_ticker),
-                    external_id=r.get("external_id"),
-                    content=r.get("content", ""),
-                    author=r.get("author"),
-                    score=r.get("score"),
-                    sentiment=r.get("sentiment"),
-                    topics=r.get("topics"),
-                    confidence=r.get("confidence"),
-                    captured_at=_parse_dt(r.get("captured_at")),
-                )
-                session.add(record)
-        logger.info("保存 %d 条情绪记录", len(records))
+        """无状态模式：仅记录日志，不持久化。"""
+        logger.info("情绪记录（无持久化）: %d 条", len(records))
 
     async def save_competitor_snapshots(
         self,
         snapshots: list[dict[str, Any]],
     ) -> None:
-        """
-        将竞对行情快照写入 competitor_snapshots 表。
-
-        TODO: 使用 upsert by (ticker, trade_date)
-        """
-        if not snapshots:
-            return
-
-        async with get_session() as session:
-            for s in snapshots:
-                snapshot = CompetitorSnapshot(
-                    ticker=s.get("ticker", ""),
-                    price=s.get("price"),
-                    open_price=s.get("open_price"),
-                    high_price=s.get("high_price"),
-                    low_price=s.get("low_price"),
-                    volume=s.get("volume"),
-                    change_pct=s.get("change_pct"),
-                    market_cap=s.get("market_cap"),
-                    revenue_ttm=s.get("revenue_ttm"),
-                    pe_ratio=s.get("pe_ratio"),
-                    ps_ratio=s.get("ps_ratio"),
-                    trade_date=s.get("trade_date"),
-                )
-                session.add(snapshot)
-        logger.info("保存 %d 条竞对快照", len(snapshots))
+        """无状态模式：仅记录日志，不持久化。"""
+        logger.info("竞对快照（无持久化）: %d 条", len(snapshots))
 
     async def save_announcements(
         self,
         announcements: list[dict[str, Any]],
     ) -> None:
-        """
-        将港交所公告写入 announcements 表。
-
-        TODO: 高优先级公告（P3）立即触发 alert
-        """
-        if not announcements:
-            return
-
-        async with get_session() as session:
-            for a in announcements:
-                ann = Announcement(
-                    ticker=a.get("ticker", settings.primary_ticker),
-                    title=a.get("title", ""),
-                    announcement_type=a.get("announcement_type", "general"),
-                    priority=a.get("priority", 1),
-                    url=a.get("url"),
-                    published_at=_parse_dt(a.get("published_at")),
-                )
-                session.add(ann)
+        """无状态模式：仅记录日志，不持久化。"""
         logger.info("保存 %d 条公告", len(announcements))
 
     async def build_snapshot(
@@ -184,24 +113,17 @@ class Orchestrator:
         period: str,
         sentiment_records: list[dict[str, Any]],
         market_data: list[dict[str, Any]],
-    ) -> DailySnapshot:
-        """
-        构建当前时段的情绪快照。
-
-        TODO: 从 DB 读取指定时间窗口内的所有记录计算聚合指标
-        TODO: 计算 sentiment_dist（各情绪标签的分布）
-        """
+    ) -> dict[str, Any]:
+        """构建当前时段的情绪快照（无状态，返回 dict）。"""
         scores = [r["score"] for r in sentiment_records if r.get("score") is not None]
         sentiment_avg = sum(scores) / len(scores) if scores else None
 
-        # 统计情绪分布
         sentiment_dist: dict[str, int] = {}
         for r in sentiment_records:
             label = r.get("sentiment", "neutral")
             if label:
                 sentiment_dist[label] = sentiment_dist.get(label, 0) + 1
 
-        # 提取热门话题
         topic_counts: dict[str, int] = {}
         for r in sentiment_records:
             for topic in r.get("topics") or []:
@@ -212,23 +134,22 @@ class Orchestrator:
             reverse=True,
         )[:5]
 
-        # 获取主标的最新价格
         primary_data = next(
             (d for d in market_data if d.get("ticker") == settings.primary_ticker),
             {},
         )
 
-        return DailySnapshot(
-            period=period,
-            ticker=settings.primary_ticker,
-            sentiment_avg=round(sentiment_avg, 2) if sentiment_avg is not None else None,
-            sentiment_dist=sentiment_dist,
-            top_topics=top_topics,
-            sample_count=len(sentiment_records),
-            price=primary_data.get("price"),
-            volume=primary_data.get("volume"),
-            change_pct=primary_data.get("change_pct"),
-        )
+        return {
+            "period": period,
+            "ticker": settings.primary_ticker,
+            "sentiment_avg": round(sentiment_avg, 2) if sentiment_avg is not None else None,
+            "sentiment_dist": sentiment_dist,
+            "top_topics": top_topics,
+            "sample_count": len(sentiment_records),
+            "price": primary_data.get("price"),
+            "volume": primary_data.get("volume"),
+            "change_pct": primary_data.get("change_pct"),
+        }
 
     async def run_report(self, period: str = "morning") -> None:
         """
@@ -277,8 +198,6 @@ class Orchestrator:
         await self.save_announcements(announcements)
 
         snapshot = await self.build_snapshot(period, sentiment_records, market_data)
-        async with get_session() as session:
-            session.add(snapshot)
 
         # 6. 推送飞书报告
         report_data = {
