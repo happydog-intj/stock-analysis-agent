@@ -10,15 +10,27 @@ from datetime import datetime, UTC
 from typing import Any
 
 
-def _pct(v: float | None) -> str:
+def _to_float(v: Any) -> float | None:
+    """将任意值安全转为 float；失败返回 None。"""
     if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct(v: Any) -> str:
+    f = _to_float(v)
+    if f is None:
         return "N/A"
-    sign = "+" if v >= 0 else ""
-    return f"{sign}{v:.2f}%"
+    sign = "+" if f >= 0 else ""
+    return f"{sign}{f:.2f}%"
 
 
-def _price(v: float | None) -> str:
-    return f"{v:.3f}" if v is not None else "N/A"
+def _price(v: Any) -> str:
+    f = _to_float(v)
+    return f"{f:.3f}" if f is not None else "N/A"
 
 
 def render_report(data: dict[str, Any]) -> str:
@@ -54,7 +66,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"|------|------|",
         f"| 最新价 | {_price(price)} HKD |",
         f"| 涨跌幅 | {_pct(change)} |",
-        f"| 成交量 | {int(volume):,} |" if volume else "| 成交量 | N/A |",
+        (f"| 成交量 | {int(float(volume)):,} |" if _to_float(volume) is not None else "| 成交量 | N/A |"),
         f"| 舆情得分 | {sentiment_avg if sentiment_avg is not None else 'N/A'} |",
         "",
     ]
